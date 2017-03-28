@@ -7,28 +7,28 @@ ETERM *GetDeviceCount() {
   switch (result) {
     case cudaSuccess: return erl_format("{~a,~i}", "ok", devCount);
     case cudaErrorNoDevice: return erl_format("{~a,~i}", "ok", 0);
-    default: return CudaError(result);
+    default: return CudaRuntimeError(result);
   }
 }
 
 ETERM *GetMemory() {
   size_t freeMem, totalMem;
   cudaError_t result = cudaMemGetInfo(&freeMem, &totalMem);
-  if (result != cudaSuccess) return CudaError(result);
+  if (result != cudaSuccess) return CudaRuntimeError(result);
   return erl_format("{~a,{~i,~i}}", "ok", freeMem, totalMem);
 }
 
 ETERM *GetDriverVersion() {
   int version;
   cudaError_t result = cudaDriverGetVersion(&version);
-  if (result != cudaSuccess) return CudaError(result);
+  if (result != cudaSuccess) return CudaRuntimeError(result);
   return erl_format("{~a,~i}", "ok", version);
 }
 
 ETERM *GetRuntimeVersion() {
   int version;
   cudaError_t result = cudaRuntimeGetVersion(&version);
-  if (result != cudaSuccess) return CudaError(result);
+  if (result != cudaSuccess) return CudaRuntimeError(result);
   return erl_format("{~a,~i}", "ok", version);
 }
 

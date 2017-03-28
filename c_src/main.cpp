@@ -1,13 +1,13 @@
 #include "common.h"
-#include "erlang_driver.h"
+#include "erlang_port.h"
 
 int main(void) {
-  ErlangDriver driver;
+  ErlangPort port;
   // NOTE: add all functions here and in common.h
-  driver.AddHandler("info", Info);
+  port.AddHandler("info", Info);
   try {
-    // enter driver loop
-    driver.Loop();
+    // enter port loop
+    port.Loop();
   } catch(...) {} // exit normally on any errors - just die
   return 0;
 }

@@ -23,7 +23,7 @@ LIBS 		 += -L$(EI_LIBS) -lerl_interface -lei -lpthread
 # CUDA library
 CUDA     ?= "cuda"
 CXXFLAGS += $(shell pkg-config --cflags $(CUDA))
-LIBS     += $(shell pkg-config --libs-only-L $(CUDA)) -lcudart
+LIBS     += $(shell pkg-config --libs-only-L $(CUDA)) -lcudart -lcuda
 
 .PHONY: all port clean
 

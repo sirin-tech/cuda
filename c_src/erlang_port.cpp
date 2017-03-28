@@ -1,4 +1,4 @@
-#include "erlang_driver.h"
+#include "erlang_port.h"
 
 using __gnu_cxx::stdio_filebuf;
 
@@ -8,32 +8,34 @@ template <class T> void EndianSwap(T *buffer) {
   std::reverse(mem, mem + sizeof(T));
 }
 
-ErlangDriver::ErlangDriver() :
+ErlangPort::ErlangPort() :
     input(new stdio_filebuf<char>(PORTIN_FILENO, std::ios::in)),
     output(new stdio_filebuf<char>(PORTOUT_FILENO, std::ios::out)) {
   erl_init(NULL, 0);
+  // auto result = cuInit(0);
+  // if (result != CUDA_SUCCESS) throw new Error(CudaDriverError(result));
 }
 
-ErlangDriver::~ErlangDriver() {
+ErlangPort::~ErlangPort() {
   if (tuple) erl_free_compound(tuple);
   if (func) erl_free_term(func);
   if (arg) erl_free_term(arg);
   if (result) erl_free_term(result);
 }
 
-uint32_t ErlangDriver::ReadPacketLength() {
+uint32_t ErlangPort::ReadPacketLength() {
   uint32_t len;
   input.read(reinterpret_cast<char*>(&len), sizeof(len));
   EndianSwap(&len);
   return len;
 }
 
-void ErlangDriver::WritePacketLength(uint32_t len) {
+void ErlangPort::WritePacketLength(uint32_t len) {
   EndianSwap(&len);
   output.write(reinterpret_cast<char*>(&len), sizeof(len));
 }
 
-void ErlangDriver::Loop() {
+void ErlangPort::Loop() {
   while(true) {
     // Read len, 4 bytes
     uint32_t len = ReadPacketLength();
@@ -72,10 +74,10 @@ void ErlangDriver::Loop() {
   };
 }
 
-void ErlangDriver::AddHandler(std::string name, ErlangHandler handler) {
+void ErlangPort::AddHandler(std::string name, ErlangHandler handler) {
   handlers.insert(std::pair<std::string, ErlangHandler>(name, handler));
 }
 
-void ErlangDriver::RemoveHandler(std::string name) {
+void ErlangPort::RemoveHandler(std::string name) {
   handlers.erase(name);
 }

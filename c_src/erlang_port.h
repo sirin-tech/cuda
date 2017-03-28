@@ -1,5 +1,5 @@
-#ifndef __ERLANG_DRIVER_H__
-#define __ERLANG_DRIVER_H__
+#ifndef __ERLANG_PORT_H__
+#define __ERLANG_PORT_H__
 
 #include <iostream>
 #include <algorithm>
@@ -18,7 +18,7 @@ extern "C" {
 
 typedef ETERM *(*ErlangHandler)(ETERM *arg);
 
-class ErlangDriver {
+class ErlangPort {
 private:
   std::istream input;
   std::ostream output;
@@ -31,11 +31,11 @@ private:
   uint32_t ReadPacketLength();
   void WritePacketLength(uint32_t len);
 public:
-  ErlangDriver();
-  ~ErlangDriver();
+  ErlangPort();
+  ~ErlangPort();
   void Loop();
   void AddHandler(std::string name, ErlangHandler handler);
   void RemoveHandler(std::string name);
 };
 
-#endif // __ERLANG_DRIVER_H__
+#endif // __ERLANG_PORT_H__

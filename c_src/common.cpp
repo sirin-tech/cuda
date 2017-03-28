@@ -1,7 +1,13 @@
 #include "common.h"
 
-ETERM *CudaError(cudaError_t error) {
+ETERM *CudaRuntimeError(cudaError_t error) {
   return ERROR(cudaGetErrorString(error));
+}
+
+ETERM *CudaDriverError(CUresult error) {
+  const char *buf;
+  if (cuGetErrorString(error, &buf) == CUDA_SUCCESS) return ERROR(buf);
+  return ERROR("Unknown error");
 }
 
 
