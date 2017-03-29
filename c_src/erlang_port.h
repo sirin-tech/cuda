@@ -4,38 +4,42 @@
 #include <iostream>
 #include <algorithm>
 #include <map>
-#include <cstring>
-#include <stdio.h>
 #include <ext/stdio_filebuf.h>
 
-extern "C" {
-  #include "erl_interface.h"
-  #include "ei.h"
-}
+#include "common.h"
+#include "driver.h"
 
 #define PORTIN_FILENO  3
 #define PORTOUT_FILENO 4
 
-typedef ETERM *(*ErlangHandler)(ETERM *arg);
+class ErlangPort;
+typedef ETERM *(*ErlangHandler)(ErlangPort *port, ETERM *arg);
 
 class ErlangPort {
 private:
   std::istream input;
   std::ostream output;
   std::map<std::string, ErlangHandler> handlers;
-  ETERM *tuple;
-  ETERM *func;
-  ETERM *arg;
-  ETERM *result;
+  ETERM *tuple = NULL;
+  ETERM *func = NULL;
+  ETERM *arg = NULL;
+  ETERM *result = NULL;
 
   uint32_t ReadPacketLength();
   void WritePacketLength(uint32_t len);
 public:
+  Driver *driver = NULL;
+
   ErlangPort();
   ~ErlangPort();
   void Loop();
   void AddHandler(std::string name, ErlangHandler handler);
   void RemoveHandler(std::string name);
 };
+
+// API functions
+ETERM *Info(ErlangPort *port, ETERM *arg);
+ETERM *Init(ErlangPort *port, ETERM *arg);
+ETERM *Compile(ErlangPort *port, ETERM *arg);
 
 #endif // __ERLANG_PORT_H__

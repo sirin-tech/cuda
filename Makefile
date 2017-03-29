@@ -2,7 +2,7 @@ MIX = mix
 SOURCES = $(wildcard c_src/*.cpp)
 
 # common c++ compiler flags
-CXXFLAGS ?= -g -O3 -ansi -std=c++11 -pedantic -Wall -Wextra -Wno-long-long -Wno-write-strings
+CXXFLAGS ?= -g -O3 -ansi -std=c++11 -pedantic -Wall -Wextra -Wno-long-long
 LIBS =
 
 # os specific flags

@@ -21,6 +21,7 @@ ErlangPort::~ErlangPort() {
   if (func) erl_free_term(func);
   if (arg) erl_free_term(arg);
   if (result) erl_free_term(result);
+  if (driver) delete driver;
 }
 
 uint32_t ErlangPort::ReadPacketLength() {
@@ -37,29 +38,34 @@ void ErlangPort::WritePacketLength(uint32_t len) {
 
 void ErlangPort::Loop() {
   while(true) {
-    // Read len, 4 bytes
+    // Read packet length, 4 bytes
     uint32_t len = ReadPacketLength();
-    // Read data, len bytes
+    // Read packet data, len bytes
     char* buf = new char[len];
     input.read(buf, len);
-
+    // Decode packet
     tuple = erl_decode(reinterpret_cast<unsigned char *>(buf));
     if (!ERL_IS_TUPLE(tuple) || ERL_TUPLE_SIZE(tuple) != 2) continue;
-
+    // Retrieve function name and argument
     func  = erl_element(1, tuple);
     arg   = erl_element(2, tuple);
     delete[] buf;
 
+    // If first element of tuple is not an atom - skip it
+    if (!ERL_IS_ATOM(func)) continue;
+
+    // First tuple element is atom
+    std::string atomFunc(ERL_ATOM_PTR(func));
+    // Search for registered functions
+    auto handler = handlers.find(atomFunc);
+    // If there are no function to handle - skip packet
+    if (handler == handlers.end()) continue;
     result = NULL;
-    if (ERL_IS_ATOM(func)) {
-      // first tuple element is atom
-      std::string atomFunc(ERL_ATOM_PTR(func));
-      // search for registered functions
-      auto handler = handlers.find(atomFunc);
-      if (handler != handlers.end()) {
-        // handler founded - call it
-        result = handler->second(arg);
-      }
+    // Handler founded - call it
+    try {
+      result = handler->second(this, arg);
+    } catch (Error &e) {
+      result = e.AsTerm();
     }
 
     if (result) {
