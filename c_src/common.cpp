@@ -1,20 +1,32 @@
 #include "common.h"
 
 ETERM *StringError::AsTerm() {
-  return FORMAT("{~a,~w}", ERROR_STR, erl_mk_binary(message.c_str(), message.size()));
+  return FORMAT("{~a,~w,~w}", ERROR_STR,
+    erl_mk_binary(source.c_str(), source.size()),
+    erl_mk_binary(message.c_str(), message.size()));
 }
 
 ETERM *RuntimeError::AsTerm() {
-  const char *error = cudaGetErrorString(code);
-  return FORMAT("{~a,~w}", ERROR_STR, erl_mk_binary(error, strlen(error)));
+  const char *name = cudaGetErrorName(code);
+  const char *str = cudaGetErrorString(code);
+  return FORMAT("{~a,~w,~w,~w}", ERROR_STR,
+    erl_mk_binary(source.c_str(), source.size()),
+    erl_mk_binary(name, strlen(name)),
+    erl_mk_binary(str, strlen(str)));
 }
 
 ETERM *DriverError::AsTerm() {
-  const char *buf;
-  if (cuGetErrorString(code, &buf) == CUDA_SUCCESS) {
-    return FORMAT("{~a,~w}", ERROR_STR, erl_mk_binary(buf, strlen(buf)));
+  const char *name, *str;
+  if (cuGetErrorName(code, &name) == CUDA_SUCCESS &&
+      cuGetErrorString(code, &str) == CUDA_SUCCESS) {
+    return FORMAT("{~a,~w,~w,~w}", ERROR_STR,
+      erl_mk_binary(source.c_str(), source.size()),
+      erl_mk_binary(name, strlen(name)),
+      erl_mk_binary(str, strlen(str)));
   }
-  return FORMAT("{~a,~w}", ERROR_STR, MAKE_BINARY("Unknown error"));
+  return FORMAT("{~a,~w,~w}", ERROR_STR,
+    erl_mk_binary(source.c_str(), source.size()),
+    MAKE_BINARY("Unknown error"));
 }
 
 Keywords GetKeywords(ETERM *list) {

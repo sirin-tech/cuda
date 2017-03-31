@@ -8,14 +8,18 @@ Driver::Driver(int deviceNo) {
   if (result != CUDA_SUCCESS) throw DriverError(result);
   result = cuCtxCreate(&context, 0, device);
   if (result != CUDA_SUCCESS) throw DriverError(result);
+  DEBUG("Driver initialized for device #" << deviceNo);
 }
 
 Driver::~Driver() {
   for (auto module = modules.begin(); module != modules.end(); ++module) {
     cuModuleUnload(module->second);
   }
+  for (auto mem = memory.begin(); mem != memory.end(); ++mem) {
+    delete mem->second;
+  }
   cuCtxDestroy(context);
-  // cuCtxPopCurrent(&context);
+  DEBUG("Driver destroyed");
 }
 
 int Driver::Compile(std::list<std::string> sources, LinkerOptions &options) {
@@ -29,6 +33,59 @@ int Driver::Compile(std::list<std::string> sources, LinkerOptions &options) {
   modules.insert(std::pair<int, CUmodule>(moduleNo, module));
 
   return moduleNo;
+}
+
+int Driver::LoadMemory(const void *src, size_t size) {
+  DeviceMemory *mem = new DeviceMemory(src, size);
+  int memNo = memory.size() + 1;
+  memory.insert(std::pair<int, DeviceMemory *>(memNo, mem));
+  return memNo;
+}
+
+void Driver::UnloadMemory(int id) {
+  auto mem = memory.find(id);
+  if (mem == memory.end()) throw StringError("Invalid memory handle");
+  delete mem->second;
+  memory.erase(id);
+}
+
+void Driver::ReadMemory(int id, void *dst, int size) {
+  auto mem = memory.find(id);
+  if (mem == memory.end()) throw StringError("Invalid memory handle");
+  mem->second->Read(dst, size);
+}
+
+int Driver::GetMemorySize(int id) {
+  auto mem = memory.find(id);
+  if (mem == memory.end()) return -1;
+  return mem->second->GetSize();
+}
+
+void Driver::Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
+                 int bx, int by, int bz, std::vector<int> params) {
+  auto module = modules.find(moduleNo);
+  if (module == modules.end()) throw StringError("Invalid module handle");
+  std::vector<void *> args;
+  for (auto memNo = params.begin(); memNo != params.end(); ++memNo) {
+    auto mem = memory.find(*memNo);
+    if (mem == memory.end()) throw StringError("Invalid memory handle");
+    args.push_back((void *)mem->second->GetPtrPtr());
+  }
+  CUfunction func;
+  auto result = cuModuleGetFunction(&func, module->second, funcName.c_str());
+  if (result != CUDA_SUCCESS) throw DriverError(result);
+  void **paramsPtr = params.empty() ? NULL : args.data();
+  std::cout << "LAUNCH {" << gx << "," << gy << "," << gz << "}, {"
+            << bx << "," << by << "," << bz << "}"<< "\n";
+
+  result = cuLaunchKernel(func, gx, gy, gz, bx, by, bz, 0, 0, paramsPtr, 0);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:execution");
+
+  // result = cuMemcpyDtoH((void *)hA, dA, 10);
+  // if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:3");
+  // std::cout << "test: " << hA[0] << "\n";
+
+  std::cout << "EXIT\n";
 }
 
 ETERM *CompileError::AsTerm() {

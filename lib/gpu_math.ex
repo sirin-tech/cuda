@@ -29,11 +29,52 @@ defmodule GPUMath do
   end
 
   def compile(sources, opts \\ nil)
+  def compile({:file, file}, opts) when is_binary(file) do
+    with {:ok, source} <- File.read(file) do
+      GenServer.call(__MODULE__, {:call, :compile, {[source], opts}})
+    end
+  end
+  def compile({:files, files}, opts) when is_list(files) do
+    sources = Enum.reduce(files, {:ok, []}, fn
+      {:ok, sources}, file ->
+        with {:ok, source} <- File.read(file), do: [source | sources]
+      error, _ ->
+        error
+    end)
+    with {:ok, sources} <- sources do
+      GenServer.call(__MODULE__, {:call, :compile, {sources, opts}})
+    end
+  end
   def compile(source, opts) when is_binary(source) do
     GenServer.call(__MODULE__, {:call, :compile, {[source], opts}})
   end
   def compile(sources, opts) when is_list(sources) do
     GenServer.call(__MODULE__, {:call, :compile, {sources, opts}})
+  end
+
+  def memory_load(data) do
+    GenServer.call(__MODULE__, {:call, :memory_load, data})
+  end
+
+  def memory_read(handle) do
+    GenServer.call(__MODULE__, {:call, :memory_read, handle})
+  end
+
+  def memory_unload(handle) do
+    GenServer.call(__MODULE__, {:call, :memory_unload, handle})
+  end
+
+  def run(module, func) do
+    GenServer.call(__MODULE__, {:call, :run, {module, func}})
+  end
+  def run(module, func, params) do
+    GenServer.call(__MODULE__, {:call, :run, {module, func, params}})
+  end
+  def run(module, func, block, params) do
+    GenServer.call(__MODULE__, {:call, :run, {module, func, block, params}})
+  end
+  def run(module, func, block, grid, params) do
+    GenServer.call(__MODULE__, {:call, :run, {module, func, block, grid, params}})
   end
 
   def init(opts) do

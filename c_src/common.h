@@ -6,7 +6,10 @@
 #include <list>
 #include <map>
 #include <cstring>
+
+//#ifdef GPU_DEBUG
 #include <iostream>
+//#endif
 
 extern "C" {
   #include "erl_interface.h"
@@ -24,37 +27,45 @@ extern "C" {
 #define ATOM_EQ(term, str) (strncmp(ERL_ATOM_PTR(term), str, sizeof(str) - 1) == 0)
 #define IS_NIL(term) (ERL_IS_ATOM(term) && strncmp(ERL_ATOM_PTR(term), "nil", 3) == 0)
 #define IS_OK_TUPLE(term) (strncmp(ERL_ATOM_PTR(erl_element(1, term)), "ok", 2) == 0)
+#ifdef GPU_DEBUG
+  #define DEBUG(msg) std::cout << msg << "\n"
+#else
+  #define DEBUG(msg) do {} while(0)
+#endif
 
 class Error {
+protected:
+  std::string source;
 public:
+  Error(const char *src = NULL) : source(src ? src : "") {}
   virtual ETERM *AsTerm() = 0;
 };
 
 class TermError : public Error {
 public:
   ETERM *term;
-  TermError(ETERM *error): Error(), term(error) {}
+  TermError(ETERM *error, const char *src = NULL): Error(src), term(error) {}
   virtual ETERM *AsTerm() { return term; }
 };
 
 class StringError : public Error {
 public:
   std::string message;
-  StringError(const char *errorMessage): Error(), message(errorMessage) {}
+  StringError(const char *errorMessage, const char *src = NULL): Error(src), message(errorMessage) {}
   virtual ETERM *AsTerm();
 };
 
 class RuntimeError : public Error {
 public:
   cudaError_t code;
-  RuntimeError(cudaError_t errorNo): Error(), code(errorNo) {}
+  RuntimeError(cudaError_t errorNo, const char *src = NULL): Error(src), code(errorNo) {}
   virtual ETERM *AsTerm();
 };
 
 class DriverError : public Error {
 public:
   CUresult code;
-  DriverError(CUresult errorNo): Error(), code(errorNo) {}
+  DriverError(CUresult errorNo, const char *src = NULL): Error(src), code(errorNo) {}
   virtual ETERM *AsTerm();
 };
 

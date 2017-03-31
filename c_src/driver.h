@@ -36,6 +36,46 @@ public:
   void Run(std::list<std::string> sources);
 };
 
+class DeviceMemory {
+private:
+  CUdeviceptr ptr = (CUdeviceptr)NULL;
+  bool initialized = false;
+  size_t size;
+public:
+  DeviceMemory(const void *src, size_t srcSize): size(srcSize) {
+    auto result = cuMemAlloc(&ptr, size);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "DeviceMemory:allocate");
+    result = cuMemcpyHtoD(ptr, src, size);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "DeviceMemory:copy");
+    std::cout << "MEMORY ALLOC: " << ptr << "\n";
+    initialized = true;
+  }
+
+  ~DeviceMemory() {
+    std::cout << "DESTROY MEMORY\n";
+    if (initialized) cuMemFree(ptr);
+  }
+
+  void Read(void *dst, int dstSize = -1) {
+    if (dstSize < 0) dstSize = size;
+    std::cout << "MEMORY READ: " << ptr << "\n";
+    auto r = cudaMemcpy(dst, (void *)ptr, dstSize, cudaMemcpyDeviceToHost);
+    if (r != cudaSuccess) throw RuntimeError(r, "DeviceMemory:read");
+  }
+
+  size_t GetSize() {
+    return size;
+  }
+
+  CUdeviceptr GetPtr() {
+    return ptr;
+  }
+
+  CUdeviceptr *GetPtrPtr() {
+    return &ptr;
+  }
+};
+
 /*
 class Worker {
 public:
@@ -62,10 +102,18 @@ private:
   CUdevice    device;
   CUcontext   context;
   std::map<int, CUmodule> modules;
+  std::map<int, DeviceMemory *> memory;
 public:
   Driver(int deviceNo);
   ~Driver();
   int Compile(std::list<std::string> sources, LinkerOptions &options);
+  int LoadMemory(const void *src, size_t size);
+  void UnloadMemory(int id);
+  void ReadMemory(int id, void *dst, int size = -1);
+  int GetMemorySize(int id);
+  void Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
+           int bx, int by, int bz, std::vector<int> params);
+
   // void Run(int module, std::string func, std::vector<void *> args);
 };
 

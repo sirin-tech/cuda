@@ -41,5 +41,9 @@ public:
 ETERM *Info(ErlangPort *port, ETERM *arg);
 ETERM *Init(ErlangPort *port, ETERM *arg);
 ETERM *Compile(ErlangPort *port, ETERM *arg);
+ETERM *MemoryLoad(ErlangPort *port, ETERM *arg);
+ETERM *MemoryRead(ErlangPort *port, ETERM *arg);
+ETERM *MemoryUnload(ErlangPort *port, ETERM *arg);
+ETERM *Run(ErlangPort *port, ETERM *arg);
 
 #endif // __ERLANG_PORT_H__
