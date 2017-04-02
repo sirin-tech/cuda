@@ -61,3 +61,27 @@ template <> bool Get<bool>(ETERM *value) {
   if (ATOM_EQ(value, "false")) return false;
   throw StringError("Bad argument");
 }
+
+int GetModuleIndex(ETERM *value) {
+  if (!ERL_IS_TUPLE(value) || erl_size(value) != 2) {
+    throw StringError("Invalid module handle");
+  }
+  auto a = erl_element(1, value);
+  auto v = erl_element(2, value);
+  if (!ERL_IS_ATOM(a) || !ATOM_EQ(a, "module")) {
+    throw StringError("Invalid module handle");
+  }
+  return Get<int>(v);
+}
+
+int GetMemoryIndex(ETERM *value) {
+  if (!ERL_IS_TUPLE(value) || erl_size(value) != 2) {
+    throw StringError("Invalid memory handle");
+  }
+  auto a = erl_element(1, value);
+  auto v = erl_element(2, value);
+  if (!ERL_IS_ATOM(a) || !ATOM_EQ(a, "memory")) {
+    throw StringError("Invalid memory handle");
+  }
+  return Get<int>(v);
+}

@@ -1,8 +1,8 @@
-defmodule GPUMath.Mixfile do
+defmodule Cuda.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :gpu_math,
+    [app: :cuda,
      version: "0.1.0",
      elixir: "~> 1.4",
      build_embedded: Mix.env == :prod,
@@ -12,7 +12,7 @@ defmodule GPUMath.Mixfile do
   end
 
   def application do
-    [mod: {GPUMath.App, []},
+    [#mod: {Cuda.App, []},
      extra_applications: [:logger]]
   end
 
@@ -35,10 +35,10 @@ defmodule Mix.Tasks.Compile.Port do
     opts = [stderr_to_stdout: true,
             env: [{"CUDA", cuda}]]
     if match? {:win32, _}, :os.type do
-      {result, _error_code} = System.cmd("nmake", ["priv\\gpu_math_port.exe"], opts)
+      {result, _error_code} = System.cmd("nmake", ["priv\\cuda_port.exe"], opts)
       Mix.shell.info result
     else
-      {result, _error_code} = System.cmd("make", ["priv/gpu_math_port"], opts)
+      {result, _error_code} = System.cmd("make", ["priv/cuda_port"], opts)
       Mix.shell.info result
     end
   end

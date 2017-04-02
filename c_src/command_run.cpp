@@ -1,3 +1,4 @@
+#include "common.h"
 #include "driver.h"
 #include "erlang_port.h"
 
@@ -8,14 +9,13 @@ ETERM *Run(ErlangPort *port, ETERM *arg) {
   if (argc < 2) throw StringError("Bad argument");
   auto moduleTerm = erl_element(1, arg);
   auto funcTerm   = erl_element(2, arg);
-  if (!ERL_IS_INTEGER(moduleTerm)) throw StringError("Bad argument");
   if (!ERL_IS_BINARY(funcTerm)) throw StringError("Bad argument");
 
-  auto module = Get<int>(moduleTerm);
+  auto module = GetModuleIndex(moduleTerm);
   std::string func((char *)ERL_BIN_PTR(funcTerm), erl_size(funcTerm));
   int gx = 1, gy = 1, gz = 1;
   int bx = 1, by = 1, bz = 1;
-  std::vector<int> args;
+  RunParameters args;
 
   if (argc > 2) {
     ETERM *grid = NULL;
@@ -71,10 +71,24 @@ ETERM *Run(ErlangPort *port, ETERM *arg) {
       if (!ERL_IS_LIST(params)) throw StringError("Bad argument");
       auto s = erl_length(params);
       for (int i = 0; i < s; i++) {
-        auto n = erl_hd(params);
+        auto param = erl_hd(params);
         params = erl_tl(params);
-        // if (!ERL_IS_INTEGER(n)) throw StringError("Bad argument");
-        args.push_back(Get<int>(n));
+        if (ERL_IS_TUPLE(param)) {
+          auto param_type = erl_element(1, param);
+          auto param_value = erl_element(2, param);
+          if (ERL_IS_ATOM(param_type) && ATOM_EQ(param_type, "memory")) {
+            auto mem = port->driver->GetMemory(Get<int>(param_value));
+            if (!mem) throw StringError("Invalid memory handle");
+            args.Add(*mem);
+          }
+        } else if (ERL_IS_INTEGER(param)) {
+          args.Add(ERL_INT_VALUE(param));
+        } else if (ERL_IS_FLOAT(param)) {
+          float f = ERL_FLOAT_VALUE(param);
+          args.Add(f);
+        } else {
+          throw StringError("Bad argument");
+        }
       }
     }
   }

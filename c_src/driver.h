@@ -47,18 +47,15 @@ public:
     if (result != CUDA_SUCCESS) throw DriverError(result, "DeviceMemory:allocate");
     result = cuMemcpyHtoD(ptr, src, size);
     if (result != CUDA_SUCCESS) throw DriverError(result, "DeviceMemory:copy");
-    std::cout << "MEMORY ALLOC: " << ptr << "\n";
     initialized = true;
   }
 
   ~DeviceMemory() {
-    std::cout << "DESTROY MEMORY\n";
     if (initialized) cuMemFree(ptr);
   }
 
   void Read(void *dst, int dstSize = -1) {
     if (dstSize < 0) dstSize = size;
-    std::cout << "MEMORY READ: " << ptr << "\n";
     auto r = cudaMemcpy(dst, (void *)ptr, dstSize, cudaMemcpyDeviceToHost);
     if (r != cudaSuccess) throw RuntimeError(r, "DeviceMemory:read");
   }
@@ -73,6 +70,32 @@ public:
 
   CUdeviceptr *GetPtrPtr() {
     return &ptr;
+  }
+};
+
+class RunParameters {
+private:
+  std::vector<void *> values;
+public:
+  ~RunParameters() {
+    for (auto it = values.begin(); it != values.end(); ++it) std::free(*it);
+  }
+
+  template <typename T> void Add(T param) {
+    auto ptr = (T *)malloc(sizeof(T));
+    *ptr = param;
+    values.push_back(ptr);
+  }
+
+  void Add(DeviceMemory &memory) {
+    auto ptr = (CUdeviceptr *)malloc(sizeof(CUdeviceptr));
+    *ptr = memory.GetPtr();
+    values.push_back(ptr);
+  }
+
+  void **GetPtr() {
+    if (values.empty()) return NULL;
+    return values.data();
   }
 };
 
@@ -111,9 +134,12 @@ public:
   void UnloadMemory(int id);
   void ReadMemory(int id, void *dst, int size = -1);
   int GetMemorySize(int id);
+  DeviceMemory *GetMemory(int id);
   void Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
-           int bx, int by, int bz, std::vector<int> params);
-
+           int bx, int by, int bz, RunParameters &params);
+  template <typename T> T Unpack(ETERM *value);
+  ETERM *PackMemory(int idx);
+  ETERM *PackModule(int idx);
   // void Run(int module, std::string func, std::vector<void *> args);
 };
 

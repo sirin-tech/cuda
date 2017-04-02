@@ -73,5 +73,7 @@ typedef std::map<std::string, ETERM *> Keywords;
 Keywords GetKeywords(ETERM *list);
 
 template <typename T> T Get(ETERM *);
+int GetModuleIndex(ETERM *);
+int GetMemoryIndex(ETERM *);
 
 #endif // __COMMON_H__

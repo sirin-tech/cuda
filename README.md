@@ -1,4 +1,4 @@
-# GPUMath
+# Cuda
 
 NVIDIA GPU CUDA library bindings for Erlang and Elixir.
 
@@ -9,6 +9,6 @@ by adding `gpu_math` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:gpu_math, "~> 0.1.0"}]
+  [{:cuda, "~> 0.1.0"}]
 end
 ```

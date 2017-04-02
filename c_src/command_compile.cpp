@@ -55,5 +55,5 @@ ETERM *Compile(ErlangPort *port, ETERM *arg) {
   }
 
   auto module = port->driver->Compile(sources, options);
-  return FORMAT("{~a,~i}", OK_STR, module);
+  return FORMAT("{~a,~w}", OK_STR, port->driver->PackModule(module));
 }

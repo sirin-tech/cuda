@@ -84,15 +84,18 @@ int BestDevice() {
   return maxPerfDevice;
 }
 
-ETERM *Init(ErlangPort *port, ETERM *arg) {
+void Init(ErlangPort *port, int device = -1) {
   if (port->driver) throw StringError("Already initialized");
-  int device = -1;
-  if (IS_NIL(arg)) {
-    device = BestDevice();
-  } else if (ERL_IS_INTEGER(arg)) {
-    device = ERL_INT_VALUE(arg);
-  }
-  if (device < 0) throw StringError("Bad argument");
+  auto result = cuInit(0);
+  if (result != CUDA_SUCCESS) throw DriverError(result);
+  // int device = -1;
+  if (device < 0) device = BestDevice();
+  // if (IS_NIL(arg)) {
+  //   device = BestDevice();
+  // } else if (ERL_IS_INTEGER(arg)) {
+  //   device = ERL_INT_VALUE(arg);
+  // }
+  if (device < 0) throw StringError("Where are no GPU devices to initialize");
   port->driver = new Driver(device);
-  return erl_mk_atom(OK_STR);
+  // return erl_mk_atom(OK_STR);
 }

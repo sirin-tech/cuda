@@ -61,31 +61,65 @@ int Driver::GetMemorySize(int id) {
   return mem->second->GetSize();
 }
 
+DeviceMemory *Driver::GetMemory(int id) {
+  auto mem = memory.find(id);
+  if (mem == memory.end()) return NULL;
+  return mem->second;
+}
+
 void Driver::Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
-                 int bx, int by, int bz, std::vector<int> params) {
+                 int bx, int by, int bz, RunParameters &params) {
   auto module = modules.find(moduleNo);
   if (module == modules.end()) throw StringError("Invalid module handle");
-  std::vector<void *> args;
-  for (auto memNo = params.begin(); memNo != params.end(); ++memNo) {
-    auto mem = memory.find(*memNo);
-    if (mem == memory.end()) throw StringError("Invalid memory handle");
-    args.push_back((void *)mem->second->GetPtrPtr());
-  }
+  // std::vector<void *> args;
+  // for (auto memNo = params.begin(); memNo != params.end(); ++memNo) {
+  //   auto mem = memory.find(*memNo);
+  //   if (mem == memory.end()) throw StringError("Invalid memory handle");
+  //   args.push_back((void *)mem->second->GetPtrPtr());
+  // }
   CUfunction func;
   auto result = cuModuleGetFunction(&func, module->second, funcName.c_str());
   if (result != CUDA_SUCCESS) throw DriverError(result);
-  void **paramsPtr = params.empty() ? NULL : args.data();
-  std::cout << "LAUNCH {" << gx << "," << gy << "," << gz << "}, {"
-            << bx << "," << by << "," << bz << "}"<< "\n";
+  // void **paramsPtr = params.empty() ? NULL : args.data();
 
-  result = cuLaunchKernel(func, gx, gy, gz, bx, by, bz, 0, 0, paramsPtr, 0);
+  result = cuLaunchKernel(func, gx, gy, gz, bx, by, bz, 0, 0, params.GetPtr(), 0);
   if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:execution");
+}
 
-  // result = cuMemcpyDtoH((void *)hA, dA, 10);
-  // if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:3");
-  // std::cout << "test: " << hA[0] << "\n";
+template <> DeviceMemory *Driver::Unpack<DeviceMemory *>(ETERM *value) {
+  if (!ERL_IS_TUPLE(value) || erl_size(value) != 2) {
+    throw StringError("Invalid memory handle");
+  }
+  auto a = erl_element(1, value);
+  auto v = erl_element(2, value);
+  if (!ERL_IS_ATOM(a) || !ATOM_EQ(a, "memory")) {
+    throw StringError("Invalid memory handle");
+  }
+  auto mem = GetMemory(Get<int>(v));
+  if (!mem) throw StringError("Invalid memory handle");
+  return mem;
+}
 
-  std::cout << "EXIT\n";
+template <> CUmodule Driver::Unpack<CUmodule>(ETERM *value) {
+  if (!ERL_IS_TUPLE(value) || erl_size(value) != 2) {
+    throw StringError("Invalid module handle");
+  }
+  auto a = erl_element(1, value);
+  auto v = erl_element(2, value);
+  if (!ERL_IS_ATOM(a) || !ATOM_EQ(a, "module")) {
+    throw StringError("Invalid module handle");
+  }
+  auto module = modules.find(Get<int>(v));
+  if (module == modules.end())  throw StringError("Invalid memory handle");
+  return module->second;
+}
+
+ETERM *Driver::PackMemory(int idx) {
+  return FORMAT("{~a,~i}", C_STR("memory"), idx);
+}
+
+ETERM *Driver::PackModule(int idx) {
+  return FORMAT("{~a,~i}", C_STR("module"), idx);
 }
 
 ETERM *CompileError::AsTerm() {

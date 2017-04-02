@@ -10,11 +10,11 @@ use Mix.Config
 
 # You can configure for your application as:
 #
-#     config :gpu_math, key: :value
+#     config :cuda, key: :value
 #
 # And access this configuration in your application as:
 #
-#     Application.get_env(:gpu_math, :key)
+#     Application.get_env(:cuda, :key)
 #
 # Or configure a 3rd-party app:
 #

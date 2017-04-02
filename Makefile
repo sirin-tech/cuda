@@ -35,11 +35,11 @@ port:
 priv:
 	mkdir -p priv
 
-priv/gpu_math_port: priv clean $(SOURCES)
+priv/cuda_port: priv $(SOURCES)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LIBS)
 
-priv/gpu_math_port.exe: priv clean $(SOURCES)
+priv/cuda_port.exe: priv $(SOURCES)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LIBS)
 
 clean:
-	$(RM) -r priv/gpu_math_port
+	$(RM) -f priv/cuda_port

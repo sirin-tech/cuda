@@ -1,6 +1,6 @@
-defmodule GPUMathTest do
+defmodule CudaTest do
   use ExUnit.Case
-  doctest GPUMath
+  doctest Cuda
 
   test "the truth" do
     assert 1 + 1 == 2
