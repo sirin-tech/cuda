@@ -23,17 +23,29 @@ Driver::~Driver() {
 }
 
 int Driver::Compile(std::list<std::string> sources, LinkerOptions &options) {
-  auto linker = new Linker(options);
-  linker->Run(sources);
+  Linker linker(options);
+  linker.Run(sources);
 
   CUmodule module;
-  auto result = cuModuleLoadData(&module, linker->cubin);
+  auto result = cuModuleLoadData(&module, linker.cubin);
   if (result != CUDA_SUCCESS) throw DriverError(result);
   int moduleNo = modules.size() + 1;
   modules.insert(std::pair<int, CUmodule>(moduleNo, module));
 
   return moduleNo;
 }
+
+int Driver::LoadModule(std::string cubin, LinkerOptions &options) {
+  Linker linker(options);
+  CUmodule module;
+  auto result = cuModuleLoadDataEx(&module, cubin.c_str(), linker.OptionsSize(),
+                                   linker.OptionsKeys(), linker.OptionsValues());
+  if (result != CUDA_SUCCESS) throw DriverError(result);
+  int moduleNo = modules.size() + 1;
+  modules.insert(std::pair<int, CUmodule>(moduleNo, module));
+  return moduleNo;
+}
+
 
 int Driver::LoadMemory(const void *src, size_t size) {
   DeviceMemory *mem = new DeviceMemory(src, size);
@@ -71,12 +83,6 @@ void Driver::Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
                  int bx, int by, int bz, RunParameters &params) {
   auto module = modules.find(moduleNo);
   if (module == modules.end()) throw StringError("Invalid module handle");
-  // std::vector<void *> args;
-  // for (auto memNo = params.begin(); memNo != params.end(); ++memNo) {
-  //   auto mem = memory.find(*memNo);
-  //   if (mem == memory.end()) throw StringError("Invalid memory handle");
-  //   args.push_back((void *)mem->second->GetPtrPtr());
-  // }
   CUfunction func;
   auto result = cuModuleGetFunction(&func, module->second, funcName.c_str());
   if (result != CUDA_SUCCESS) throw DriverError(result);
@@ -179,9 +185,6 @@ Linker::Linker(LinkerOptions &options) {
     optKeys.push_back(CU_JIT_LOG_VERBOSE);
     optValues.push_back((void *)&options.verbose);
   }
-
-  auto result = cuLinkCreate(optKeys.size(), optKeys.data(), optValues.data(), &state);
-  if (result != CUDA_SUCCESS) throw DriverError(result);
   initialized = true;
 }
 
@@ -194,9 +197,28 @@ Linker::~Linker() {
   }
 }
 
-void Linker::Run(std::list<std::string> sources) {
-  CUresult result;
+size_t Linker::OptionsSize() {
   if (!initialized) throw StringError("Unintialized linker used");
+  return optKeys.size();
+}
+
+CUjit_option *Linker::OptionsKeys() {
+  if (!initialized) throw StringError("Unintialized linker used");
+  return optKeys.data();
+}
+
+void **Linker::OptionsValues() {
+  if (!initialized) throw StringError("Unintialized linker used");
+  return optValues.data();
+}
+
+void Linker::Run(std::list<std::string> sources) {
+  if (!initialized) throw StringError("Unintialized linker used");
+
+  CUresult result;
+
+  result = cuLinkCreate(optKeys.size(), optKeys.data(), optValues.data(), &state);
+  if (result != CUDA_SUCCESS) throw DriverError(result);
 
   for (auto it = std::begin(sources); it != std::end(sources); ++it) {
     result = cuLinkAddData(state, CU_JIT_INPUT_PTX, (void *)it->c_str(), it->size() + 1, 0, 0, 0, 0);

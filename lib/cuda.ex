@@ -4,6 +4,7 @@ defmodule Cuda do
   """
 
   use GenServer
+  require Logger
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, [])
@@ -48,6 +49,10 @@ defmodule Cuda do
     GenServer.call(pid, {:call, :compile, {sources, opts}})
   end
 
+  def module_load(pid, src, opts \\ []) do
+    GenServer.call(pid, {:call, :module_load, {src, opts}})
+  end
+
   def memory_load(pid, data) do
     GenServer.call(pid, {:call_raw, :memory_load, data})
   end
@@ -74,7 +79,12 @@ defmodule Cuda do
   end
 
   def init(opts) do
+    # {device, opts} = Keyword.pop(opts, :device)
     cmd = Keyword.get(opts, :port_bin, "priv/cuda_port")
+    cmd = case Keyword.get(opts, :device) do
+      nil    -> cmd
+      device -> "#{cmd} #{device}"
+    end
     port = Port.open({:spawn, cmd}, [:binary, :nouse_stdio, packet: 4])
     {:ok, port}
   end
@@ -104,7 +114,7 @@ defmodule Cuda do
 
   def handle_info({_port, {:data, @term_call <> data}}, port) do
     msg = :erlang.binary_to_term(data)
-    IO.inspect(msg)
+    Logger.warn("Unexpected message from CUDA port: #{inspect msg}")
     {:noreply, port}
   end
 

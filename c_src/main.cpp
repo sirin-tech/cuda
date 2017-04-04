@@ -17,6 +17,7 @@ int main(int argc, char *argv[]) {
     port.AddHandler("info", Info);
     // port.AddHandler("init", Init);
     port.AddHandler("compile", Compile);
+    port.AddHandler("module_load", ModuleLoad);
     port.AddHandler("memory_read", MemoryRead);
     port.AddHandler("memory_unload", MemoryUnload);
     port.AddHandler("run", Run);

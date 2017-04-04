@@ -34,6 +34,9 @@ public:
   Linker(LinkerOptions &options);
   ~Linker();
   void Run(std::list<std::string> sources);
+  size_t OptionsSize();
+  CUjit_option *OptionsKeys();
+  void **OptionsValues();
 };
 
 class DeviceMemory {
@@ -99,14 +102,6 @@ public:
   }
 };
 
-/*
-class Worker {
-public:
-  Worker(CUmodule &module, std::string func, std::vector<void *>params);
-  ~Worker();
-  void Run();
-};*/
-
 class CompileError : public Error {
 public:
   CUresult code;
@@ -130,6 +125,7 @@ public:
   Driver(int deviceNo);
   ~Driver();
   int Compile(std::list<std::string> sources, LinkerOptions &options);
+  int LoadModule(std::string cubin, LinkerOptions &options);
   int LoadMemory(const void *src, size_t size);
   void UnloadMemory(int id);
   void ReadMemory(int id, void *dst, int size = -1);
@@ -140,7 +136,6 @@ public:
   template <typename T> T Unpack(ETERM *value);
   ETERM *PackMemory(int idx);
   ETERM *PackModule(int idx);
-  // void Run(int module, std::string func, std::vector<void *> args);
 };
 
 #endif // __DRIVER_H__

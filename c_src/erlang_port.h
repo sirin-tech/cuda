@@ -54,6 +54,7 @@ void Init(ErlangPort *port, int device);
 // API functions
 ETERM *Info(ErlangPort *port, ETERM *arg);
 ETERM *Compile(ErlangPort *port, ETERM *arg);
+ETERM *ModuleLoad(ErlangPort *port, ETERM *arg);
 ETERM *MemoryRead(ErlangPort *port, ETERM *arg);
 ETERM *MemoryUnload(ErlangPort *port, ETERM *arg);
 ETERM *Run(ErlangPort *port, ETERM *arg);
