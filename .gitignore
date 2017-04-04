@@ -20,4 +20,5 @@ erl_crash.dump
 *.ez
 
 /c_src/*.gch
+/priv/*
 /tmp
