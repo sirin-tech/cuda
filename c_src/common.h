@@ -7,9 +7,9 @@
 #include <map>
 #include <cstring>
 
-//#ifdef GPU_DEBUG
-#include <iostream>
-//#endif
+#if GPU_DEBUG > 0
+  #include <iostream>
+#endif
 
 extern "C" {
   #include "erl_interface.h"
@@ -27,7 +27,7 @@ extern "C" {
 #define ATOM_EQ(term, str) (strncmp(ERL_ATOM_PTR(term), str, sizeof(str) - 1) == 0)
 #define IS_NIL(term) (ERL_IS_ATOM(term) && strncmp(ERL_ATOM_PTR(term), "nil", 3) == 0)
 #define IS_OK_TUPLE(term) (strncmp(ERL_ATOM_PTR(erl_element(1, term)), "ok", 2) == 0)
-#ifdef GPU_DEBUG
+#if GPU_DEBUG > 0
   #define DEBUG(msg) std::cout << msg << "\n"
 #else
   #define DEBUG(msg) do {} while(0)

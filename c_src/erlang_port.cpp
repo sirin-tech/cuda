@@ -12,6 +12,10 @@ ErlangPort::ErlangPort(int device) :
     input(new stdio_filebuf<char>(PORTIN_FILENO, std::ios::in)),
     output(new stdio_filebuf<char>(PORTOUT_FILENO, std::ios::out)) {
 
+  input.exceptions(std::ifstream::failbit | std::ifstream::badbit |
+                   std::ifstream::eofbit);
+  output.exceptions(std::ofstream::failbit | std::ofstream::badbit |
+                    std::ofstream::eofbit);
   erl_init(NULL, 0);
   try {
     Init(this, device);
@@ -20,9 +24,11 @@ ErlangPort::ErlangPort(int device) :
     WritePacket(result);
     throw StringError("Initializing error");
   }
+  DEBUG("Port initialized");
 }
 
 ErlangPort::~ErlangPort() {
+  DEBUG("Port destroyed");
   if (tuple) erl_free_compound(tuple);
   if (func) erl_free_term(func);
   if (arg) erl_free_term(arg);
@@ -102,6 +108,8 @@ void ErlangPort::Loop() {
 
       // First tuple element is atom
       std::string atomFunc(ERL_ATOM_PTR(func));
+      // break on exit command
+      if (atomFunc == "exit") break;
       // Search for registered functions
       auto handlerIt = handlers.find(atomFunc);
       // If there are no function to handle - skip packet

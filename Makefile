@@ -1,8 +1,10 @@
 MIX = mix
 SOURCES = $(wildcard c_src/*.cpp)
 
+GPU_DEBUG ?= "0"
+
 # common c++ compiler flags
-CXXFLAGS ?= -g -O3 -ansi -std=c++11 -pedantic -Wall -Wextra -Wno-long-long
+CXXFLAGS ?= -g -O3 -ansi -std=c++11 -pedantic -Wall -Wextra -Wno-long-long -DGPU_DEBUG=$(GPU_DEBUG)
 LIBS =
 
 # os specific flags

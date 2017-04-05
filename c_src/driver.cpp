@@ -12,6 +12,7 @@ Driver::Driver(int deviceNo) {
 }
 
 Driver::~Driver() {
+  DEBUG("Driver destroyed");
   for (auto module = modules.begin(); module != modules.end(); ++module) {
     cuModuleUnload(module->second);
   }
@@ -19,7 +20,6 @@ Driver::~Driver() {
     delete mem->second;
   }
   cuCtxDestroy(context);
-  DEBUG("Driver destroyed");
 }
 
 int Driver::Compile(std::list<std::string> sources, LinkerOptions &options) {
@@ -189,6 +189,7 @@ Linker::Linker(LinkerOptions &options) {
 }
 
 Linker::~Linker() {
+  DEBUG("Linker destroyed");
   if (infoLog) delete infoLog;
   if (errorLog) delete errorLog;
   if (initialized) {

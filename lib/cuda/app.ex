@@ -5,8 +5,12 @@ defmodule Cuda.App do
     import Supervisor.Spec
 
     children = [
-      worker(Cuda, [])
+      worker(Cuda, [], restart: :temporary)
     ]
-    Supervisor.start_link(children, strategy: :one_for_one)
+    Supervisor.start_link(children, strategy: :simple_one_for_one, name: __MODULE__)
+  end
+
+  def start_driver(opts \\ []) do
+    Supervisor.start_child(__MODULE__, opts)
   end
 end

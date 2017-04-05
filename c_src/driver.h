@@ -54,6 +54,7 @@ public:
   }
 
   ~DeviceMemory() {
+    DEBUG("Device memory destroyed");
     if (initialized) cuMemFree(ptr);
   }
 
@@ -81,6 +82,7 @@ private:
   std::vector<void *> values;
 public:
   ~RunParameters() {
+    DEBUG("Run parameters destroyed");
     for (auto it = values.begin(); it != values.end(); ++it) std::free(*it);
   }
 

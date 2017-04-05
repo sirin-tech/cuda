@@ -8,16 +8,21 @@ defmodule Cuda.Mixfile do
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      compilers: [:port, :elixir, :app],
-     deps: deps()]
+     deps: deps(),
+     aliases: aliases()]
   end
 
   def application do
-    [#mod: {Cuda.App, []},
+    [mod: {Cuda.App, []},
      extra_applications: [:logger]]
   end
 
   defp deps do
     []
+  end
+
+  defp aliases do
+    [clean: ["clean.port", "clean"]]
   end
 end
 
@@ -39,6 +44,19 @@ defmodule Mix.Tasks.Compile.Port do
       Mix.shell.info result
     else
       {result, _error_code} = System.cmd("make", ["priv/cuda_port"], opts)
+      Mix.shell.info result
+    end
+  end
+end
+
+defmodule Mix.Tasks.Clean.Port do
+  def run(_) do
+    opts = [stderr_to_stdout: true]
+    if match? {:win32, _}, :os.type do
+      {result, _error_code} = System.cmd("nmake", ["clean"], opts)
+      Mix.shell.info result
+    else
+      {result, _error_code} = System.cmd("make", ["clean"], opts)
       Mix.shell.info result
     end
   end
