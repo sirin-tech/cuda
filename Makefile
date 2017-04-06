@@ -37,11 +37,11 @@ port:
 priv:
 	mkdir -p priv
 
-priv/cuda_port: priv $(SOURCES)
+priv/cuda_driver_port: priv $(SOURCES)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LIBS)
 
-priv/cuda_port.exe: priv $(SOURCES)
+priv/cuda_driver_port.exe: priv $(SOURCES)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LIBS)
 
 clean:
-	$(RM) -f priv/cuda_port
+	$(RM) -f priv/cuda_driver_port

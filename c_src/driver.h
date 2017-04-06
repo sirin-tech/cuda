@@ -51,6 +51,7 @@ public:
     result = cuMemcpyHtoD(ptr, src, size);
     if (result != CUDA_SUCCESS) throw DriverError(result, "DeviceMemory:copy");
     initialized = true;
+    DEBUG("Device memory initialized with size " << srcSize);
   }
 
   ~DeviceMemory() {

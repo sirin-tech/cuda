@@ -15,41 +15,34 @@
 
 #define MEMORY_LOAD 1
 
-class ErlangPort;
-typedef ETERM *(*ErlangHandler)(ErlangPort *port, ETERM *arg);
-typedef ETERM *(*ErlangRawHandler)(ErlangPort *port, std::shared_ptr<void> &data, size_t len);
+typedef std::shared_ptr<void> RawData;
 
 class ErlangPort {
 private:
   std::istream input;
   std::ostream output;
-  std::map<std::string, ErlangHandler> handlers;
-  std::map<int, ErlangRawHandler> rawHandlers;
   ETERM *tuple = NULL;
-  ETERM *func = NULL;
+  ETERM *funcAtom = NULL;
   ETERM *arg = NULL;
   ETERM *result = NULL;
 
   uint32_t ReadPacketLength();
   uint8_t ReadPacketType();
   uint8_t ReadRawFunc();
-  ETERM *ReadPacket(uint32_t len);
+  ETERM *ReadTermPacket(uint32_t len);
   void WritePacketLength(uint32_t len);
-  void WritePacket(ETERM *packet);
-public:
-  Driver *driver = NULL;
 
-  ErlangPort(int device);
+protected:
+  void WriteTermPacket(ETERM *packet);
+  void WriteRawPacket(void *data, size_t size);
+  virtual ETERM *HandleTermFunction(std::string name, ETERM *arg) = 0;
+  virtual ETERM *HandleRawFunction(std::string name, RawData &data, size_t size) = 0;
+
+public:
+  ErlangPort();
   ~ErlangPort();
   void Loop();
-  void SendRawReply(void *data, size_t size);
-  void AddHandler(std::string name, ErlangHandler handler);
-  void AddRawHandler(int id, ErlangRawHandler handler);
-  void RemoveHandler(std::string name);
-  void RemoveRawHandler(int id);
 };
-
-void Init(ErlangPort *port, int device);
 
 // API functions
 ETERM *Info(ErlangPort *port, ETERM *arg);

@@ -3,10 +3,12 @@
 #include "driver.h"
 
 Driver::Driver(int deviceNo) {
+  DEBUG("Enter Driver constructor");
   CUresult result = CUDA_SUCCESS;
   result = cuDeviceGet(&device, deviceNo);
   if (result != CUDA_SUCCESS) throw DriverError(result);
   result = cuCtxCreate(&context, 0, device);
+  DEBUG("Context created: " << result);
   if (result != CUDA_SUCCESS) throw DriverError(result);
   DEBUG("Driver initialized for device #" << deviceNo);
 }
@@ -186,6 +188,7 @@ Linker::Linker(LinkerOptions &options) {
     optValues.push_back((void *)&options.verbose);
   }
   initialized = true;
+  DEBUG("Linker initialized");
 }
 
 Linker::~Linker() {

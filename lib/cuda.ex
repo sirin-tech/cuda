@@ -9,8 +9,6 @@ defmodule Cuda do
   @term_call <<1>>
   @raw_call  <<2>>
 
-  # defdelegate start_driver(opts \\ []), to: Cuda.App
-
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, [])
   end
@@ -84,9 +82,10 @@ defmodule Cuda do
   end
 
   def init(opts) do
-    #Process.flag(:trap_exit, true)
-    # {device, opts} = Keyword.pop(opts, :device)
-    cmd = Keyword.get(opts, :port_bin, Application.app_dir(:cuda, Path.join(~w(priv cuda_port))))
+    cmd = case Keyword.get(opts, :port_bin) do
+      nil  -> Application.app_dir(:cuda, Path.join(~w(priv cuda_driver_port)))
+      port -> port
+    end
     cmd = case Keyword.get(opts, :device) do
       nil    -> cmd
       device -> "#{cmd} #{device}"
@@ -95,29 +94,17 @@ defmodule Cuda do
     {:ok, port}
   end
 
-  #def terminate(_, port) do
-  #  IO.inspect("TERMINATE")
-  #  unless is_nil(Port.info(port)) do
-  #    Port.command(port, @term_call <> :erlang.term_to_binary({:exit, nil}))
-  #    # Give the port a chance to gracefully exit
-  #    Process.sleep(50)
-  #    IO.inspect("TERMINATING PORT")
-  #    Port.close(port)
-  #  end
-  #  :ok
-  #end
-
   def handle_call({:call, func, arg}, _from, port) do
     Port.command(port, @term_call <> :erlang.term_to_binary({func, arg}))
     wait_reply(port)
   end
 
   def handle_call({:call_raw, func, arg}, _from, port) do
-    Port.command(port, @raw_call <> raw_func(func) <> arg)
+    func = "#{func}"
+    size = byte_size(func)
+    Port.command(port, @raw_call <> <<size>> <> func <> arg)
     wait_reply(port)
   end
-
-  defp raw_func(:memory_load), do: <<1>>
 
   defp wait_reply(port) do
     receive do
@@ -132,14 +119,4 @@ defmodule Cuda do
     Logger.warn("Unexpected message from CUDA port: #{inspect msg}")
     {:noreply, port}
   end
-
-  #def handle_info({:EXIT, from, :normal}, port) do
-  #  IO.inspect("EXIT SIGNAL")
-  #  if port != from do
-  #    IO.inspect("EXIT NOT FROM PORT - TERMINATE PORT GRACEFULLY")
-  #    unless is_nil(Port.info(port)), do: Port.close(port)
-  #    # Port.close(port)
-  #  end
-  #  {:stop, :normal, port}
-  #end
 end

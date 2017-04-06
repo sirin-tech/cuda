@@ -40,10 +40,10 @@ defmodule Mix.Tasks.Compile.Port do
     opts = [stderr_to_stdout: true,
             env: [{"CUDA", cuda}]]
     if match? {:win32, _}, :os.type do
-      {result, _error_code} = System.cmd("nmake", ["priv\\cuda_port.exe"], opts)
+      {result, _error_code} = System.cmd("nmake", ["priv\\cuda_driver_port.exe"], opts)
       Mix.shell.info result
     else
-      {result, _error_code} = System.cmd("make", ["priv/cuda_port"], opts)
+      {result, _error_code} = System.cmd("make", ["priv/cuda_driver_port"], opts)
       Mix.shell.info result
     end
   end
