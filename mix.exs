@@ -18,7 +18,7 @@ defmodule Cuda.Mixfile do
   end
 
   defp deps do
-    []
+    [{:uuid, "~> 1.1"}]
   end
 
   defp aliases do
