@@ -1,6 +1,9 @@
 defmodule Cuda.Graph do
+  @moduledoc """
+  Represents evaluation graph
+  """
+
   alias Cuda.Graph.Node
-  # alias Cuda.Graph.Connector
 
   @type id :: String.t | atom | non_neg_integer
   @type connection :: id | {id, id}
@@ -64,7 +67,7 @@ defmodule Cuda.Graph do
   def node(_, _), do: nil
 
   @doc """
-  Creates graph input.
+  Creates a graph input.
 
   Returns newly created graph, so you can chain this function to other helpers
   like `run/3` or `connect/3`.
@@ -75,7 +78,7 @@ defmodule Cuda.Graph do
   end
 
   @doc """
-  Creates graph output.
+  Creates a graph output.
   """
   @spec output(graph :: t) :: t
   @spec output(graph :: t, src :: connection) :: t
@@ -91,12 +94,12 @@ defmodule Cuda.Graph do
   @doc """
   Connects two nodes.
 
-  If one argument specified then its used as destination node. In this case
-  last node in graph or graph input (if there are no nodes in graph) will be
-  used as source node.
+  If one argument is specified then its used as a destination node. In this case
+  last node in the graph or graph input (if there are no nodes in the graph)
+  will be used as a source node.
 
-  If two arguments specified then first argument is a source node and second
-  is destination.
+  If two arguments is specified then first argument is a source node and second
+  is a destination.
 
   To specify exact input or output use {node_name, pin_name} tuple.
   """
@@ -130,16 +133,16 @@ defmodule Cuda.Graph do
   You can specify node name with `name` option. If not specified then it will
   be filled with a random UUID.
 
-  If source node has several outputs and you want to get data from specified
-  output specify output name in `source` option. Firstly created operation
-  automatically connected to graph input and you should not use `source`
-  option in frist `run/3` call. Also `source` can by specified in
+  If source node has several outputs and you want to get data from the specified
+  output specify output name in `source` option. Firstly created operation is
+  automatically connected to graph input and you should not use a `source`
+  option in the frist `run/3` call. Also `source` can be specified in the
   {node_name, pin_name} form.
 
   If newly created node has several inputs and you want to connect source node
-  to specified input, specify input name in `input` option. In this case other
-  inputs remains unconnected and you should connect it later with `connect/3`
-  function.
+  to specified input, specify input name in the `input` option. In this case
+  other inputs remains unconnected and you should connect it later with the
+  `connect/3` function.
 
   You can use `source` and `input` options together.
 

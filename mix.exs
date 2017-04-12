@@ -9,7 +9,8 @@ defmodule Cuda.Mixfile do
      start_permanent: Mix.env == :prod,
      compilers: [:port, :elixir, :app],
      deps: deps(),
-     aliases: aliases()]
+     aliases: aliases(),
+     docs: docs()]
   end
 
   def application do
@@ -18,11 +19,19 @@ defmodule Cuda.Mixfile do
   end
 
   defp deps do
-    [{:uuid, "~> 1.1"}]
+    [{:uuid, "~> 1.1"},
+     {:credo, "~> 0.7", only: [:dev, :test]},
+     {:ex_doc, "~> 0.15", only: :dev, runtime: false}]
   end
 
   defp aliases do
     [clean: ["clean.port", "clean"]]
+  end
+
+  defp docs do
+    [main: "Cuda",
+     #logo: "path/to/logo.png",
+     extras: ["README.md"]]
   end
 end
 

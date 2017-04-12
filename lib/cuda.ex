@@ -77,6 +77,10 @@ defmodule Cuda do
   def run(pid, module, func, block, params) do
     GenServer.call(pid, {:call, :run, {module, func, block, params}})
   end
+  # NOTE: change @lint attribute to something that will be proposed to
+  #       replace deprecation and activate Credo.Check.Refactor.FunctionArity
+  #       in .credo.exs with default max_arity (5)
+  # @lint {Credo.Check.Refactor.FunctionArity, false}
   def run(pid, module, func, block, grid, params) do
     GenServer.call(pid, {:call, :run, {module, func, block, grid, params}})
   end

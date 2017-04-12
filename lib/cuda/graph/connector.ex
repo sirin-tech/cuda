@@ -1,4 +1,8 @@
 defmodule Cuda.Graph.Connector do
+  @moduledoc """
+  Represents evaluation graph node connector.
+  """
+
   alias Cuda.Graph
 
   @type type :: :input | :output | :producer | :consumer

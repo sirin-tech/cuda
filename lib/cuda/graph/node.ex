@@ -1,4 +1,8 @@
 defmodule Cuda.Graph.Node do
+  @moduledoc """
+  Represents evaluation graph node.
+  """
+
   alias Cuda.Graph
   alias Cuda.Graph.Connector
 
