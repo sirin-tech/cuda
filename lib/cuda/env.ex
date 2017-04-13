@@ -4,18 +4,22 @@ defmodule Cuda.Env do
   """
   alias Cuda.Env.Validation
 
-  @type t :: %__MODULE__{
-    float_size: integer(),
-    int_size: integer(),
-    memory_optimization: boolean()}
+  @type optimize :: :memory | :speed | :adaptive | :none
+  @type float_size :: 16 | 32 | 64
+  @type int_size :: 8 | 16 | 32 | 64
 
-  defstruct [:float_size, :int_size, :memory_optimization]
+  @type t :: %__MODULE__{
+    float_size: float_size,
+    int_size: int_size,
+    optimize: optimize}
+
+  defstruct [:float_size, :int_size, :optimize]
 
   @env_var "CUDA_ENV"
   @default %{
     float_size: 32,
     int_size: 8,
-    memory_optimization: true}
+    optimize: :none}
 
   @doc """
   Creates default filled env map
@@ -26,10 +30,10 @@ defmodule Cuda.Env do
   end
 
   @doc """
-  Return env map filled from :cuda config (config.exs)
+  Returns env map filled from :cuda config (config.exs)
   with key loaded from system env CUDA_ENV
   """
-  @spec load() :: {:ok, t} | {:error, string()}
+  @spec load() :: {:ok, t} | Cuda.error_tuple
   def load() do
     case get_env() do
       nil ->
@@ -44,45 +48,39 @@ defmodule Cuda.Env do
   @doc """
   Merge env map with keyword list opts
   """
-  @spec merge(t, [{atom(), any()}]) :: {:ok, t} | {:error, string()}
+  @spec merge(t, [keyword]) :: {:ok, t} | Cuda.error_tuple
   def merge(env, opts) do
     keys = get_keys() |> MapSet.new()
     fill_in(opts, keys, env)
   end
 
   @doc """
-  Return default env values map
+  Returns default env values map
   """
-  @spec get_default() :: map()
+  @spec get_default() :: map
   def get_default(), do: @default
 
   defp get_keys() do
     %__MODULE__{}
+    |> Map.from_struct()
     |> Map.keys()
-    |> Enum.filter(&(&1 != :__struct__))
   end
 
   defp get_env() do
-    case System.get_env(@env_var) do
-      nil ->
-        nil
-      val ->
-        val = String.to_atom(val)
-        Application.get_env(:cuda, val)
+    with val when not is_nil(val) <- System.get_env(@env_var) do
+      val = String.to_atom(val)
+      Application.get_env(:cuda, val)
     end
   end
 
   defp fill_in([], _, env), do: {:ok, env}
   defp fill_in([{key, value} | rest], keys, env) do
-    case Validation.validate(key, value) do
-      {:ok, value} ->
-        if MapSet.member?(keys, key) do
-          fill_in(rest, keys, Map.put(env, key, value))
-        else
-          {:error, "unexpected value name in config"}
-        end
-      error        ->
-        error
+    with {:ok, value} <- Validation.validate(key, value) do
+      if MapSet.member?(keys, key) do
+        fill_in(rest, keys, Map.put(env, key, value))
+      else
+        {:error, "unexpected value name in config"}
+      end
     end
   end
 end

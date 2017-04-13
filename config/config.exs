@@ -22,8 +22,8 @@ use Mix.Config
 #
 
 config :cuda, :values_for_cuda_testing,
-  float_size:          16,
-  memory_optimization: false
+  float_size: 16,
+  optimize:   :memory
 
 
 # It is also possible to import configuration files, relative to this

@@ -6,9 +6,9 @@ Represents module for validate environment values
   @doc """
   Validates environment variables
   """
-  @spec validate(atom(), any()) :: {:ok | :error, any()}
-  def validate(:memory_optimization, value) do
-    if is_boolean(value) do
+  @spec validate(atom, any) :: {:ok, any} | Cuda.error_tuple
+  def validate(:optimize, value) do
+    if Enum.member?([:memory, :speed, :adaptive, :none], value) do
       {:ok, value}
     else
       validate_error("wrong memory_optimization value, permitted values: true, false")
