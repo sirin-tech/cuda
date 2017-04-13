@@ -21,6 +21,11 @@ use Mix.Config
 #     config :logger, level: :info
 #
 
+config :cuda, :values_for_cuda_testing,
+  float_size:          16,
+  memory_optimization: false
+
+
 # It is also possible to import configuration files, relative to this
 # directory. For example, you can emulate configuration per environment
 # by uncommenting the line below and defining dev.exs, test.exs and such.
