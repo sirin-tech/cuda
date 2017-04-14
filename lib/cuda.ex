@@ -2,12 +2,13 @@ defmodule Cuda do
   @moduledoc """
   NVIDIA GPU CUDA library bindings for Erlang and Elixir.
   """
-
   use GenServer
   require Logger
 
   @term_call <<1>>
   @raw_call  <<2>>
+
+  @type error_tuple :: {:error, String.t}
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, [])
