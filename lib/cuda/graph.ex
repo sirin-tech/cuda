@@ -6,21 +6,33 @@ defmodule Cuda.Graph do
   alias Cuda.Graph.Node
 
   @type id :: String.t | atom | non_neg_integer
-  @type connection :: id | {id, id}
+  @type link :: id | {id, id}
 
   @type t :: %__MODULE__{
     id: id,
     nodes: [Node.t],
-    connections: [{id | :input, id | :output}]
+    links: [{id | :input, id | :output}]
   }
 
-  @src_conn_types ~w(output producer)a
-  @dst_conn_types ~w(input consumer)a
+  @callback __graph__(graph :: t, opts :: keyword, env :: keyword) :: t
 
-  defmacro __using__ do
+  @exports [connect: 2, connect: 3,
+            #output: 1, output: 2,
+            run: 2, run: 3]
+
+  @src_pin_types ~w(output producer)a
+  @dst_pin_types ~w(input consumer)a
+
+  defmacro __using__(_opts) do
+    quote do
+      use Cuda.Graph.Node
+      import unquote(__MODULE__), only: unquote(@exports)
+      @behaviour unquote(__MODULE__)
+      def __type__(_, _), do: :graph
+    end
   end
 
-  defstruct [:id, nodes: [], connections: []]
+  defstruct [:id, nodes: [], links: []]
 
   @spec gen_id() :: id
   def gen_id do
@@ -28,30 +40,18 @@ defmodule Cuda.Graph do
   end
 
   @doc """
-  Defines an evaluation graph.
-
-  All operations should be specified inside do block.
+  Creates new evaluation graph
   """
-  defmacro graph(name \\ nil, opts \\ []) do
-    {name, opts} = if is_list(name) do
-      {gen_id(), name}
-    else
-      {name, opts}
+  @spec new(module :: module, opts :: keyword, env :: keyword) :: t
+  def new(module, opts \\ [], env \\ []) do
+    graph = Node.new(module, opts, env) |> Map.from_struct
+    graph = struct(__MODULE__, graph)
+    graph = case function_exported?(module, :__graph__, 3) do
+      true -> module.__graph__(graph, opts, env)
+      _    -> graph
     end
-    opts = if Keyword.keyword?(opts), do: opts, else: []
-    block = Keyword.get(opts, :do)
-    if is_nil(block) do
-      raise CompileError, description: "do block is required for graph macro"
-    end
-    exports = [connect: 2, connect: 3,
-               input: 0,
-               output: 1, output: 2,
-               run: 2, run: 3]
-    eval_opts = [functions: [{__MODULE__, exports} | __CALLER__.functions]]
-    {graph, _bindings} = Code.eval_quoted(block, [], eval_opts)
     validate!(graph)
-    graph = %{graph | id: name}
-    Macro.escape(graph)
+    graph
   end
 
   @doc """
@@ -67,25 +67,14 @@ defmodule Cuda.Graph do
   def node(_, _), do: nil
 
   @doc """
-  Creates a graph input.
-
-  Returns newly created graph, so you can chain this function to other helpers
-  like `run/3` or `connect/3`.
-  """
-  @spec input() :: t
-  def input() do
-    %__MODULE__{}
-  end
-
-  @doc """
   Creates a graph output.
   """
   @spec output(graph :: t) :: t
-  @spec output(graph :: t, src :: connection) :: t
+  @spec output(graph :: t, src :: link) :: t
   def output(graph, src \\ nil)
-  def output(%__MODULE__{connections: connections} = graph, src) do
-    src = gen_src_conn(graph, src)
-    %{graph | connections: connections ++ [{src, :output}]}
+  def output(%__MODULE__{links: links} = graph, src) do
+    src = gen_src_link(graph, src)
+    %{graph | links: links ++ [{src, :output}]}
   end
   def output(_, _) do
     raise CompileError, description: "Invalid output/2 usage"
@@ -103,24 +92,24 @@ defmodule Cuda.Graph do
 
   To specify exact input or output use {node_name, pin_name} tuple.
   """
-  @spec connect(graph :: t, dst :: connection) :: t
-  @spec connect(graph :: t, src :: connection, dst :: connection) :: t
+  @spec connect(graph :: t, dst :: link) :: t
+  @spec connect(graph :: t, src :: link, dst :: link) :: t
   def connect(graph, src, dst \\ nil)
-  def connect(%__MODULE__{connections: connections} = graph, src, dst) do
+  def connect(%__MODULE__{links: links} = graph, src, dst) do
     {src, dst} = if is_nil(dst), do: {nil, src}, else: {src, dst}
     src = case {src, dst} do
-      # one arg form - src contains conn_id
-      {_, nil} -> gen_src_conn(graph, src)
+      # one arg form - src contains pin_id
+      {_, nil} -> gen_src_link(graph, src)
       # two args from
-      # src contains {node_id, conn_id}
-      {src, _} when is_tuple(src) -> gen_src_conn(graph, src)
+      # src contains {node_id, pin_id}
+      {src, _} when is_tuple(src) -> gen_src_link(graph, src)
       # src not specified - use previous node and guess connector
-      {nil, _} -> gen_src_conn(graph, nil)
+      {nil, _} -> gen_src_link(graph, nil)
       # src contains node_id, connector should be guessed
-      {src, _} -> gen_src_conn(graph, {src, nil})
+      {src, _} -> gen_src_link(graph, {src, nil})
     end
-    dst = gen_dst_conn(graph, dst)
-    %{graph | connections: connections ++ [{src, dst}]}
+    dst = gen_dst_link(graph, dst)
+    %{graph | links: links ++ [{src, dst}]}
   end
   def connect(_, _, _) do
     raise CompileError, description: "Invalid connect/3 usage"
@@ -160,11 +149,11 @@ defmodule Cuda.Graph do
     {source, opts} = Keyword.pop(opts, :source)
 
     node = Node.new(module, opts)
-    src = gen_src_conn(graph, source)
+    src = gen_src_link(graph, source)
     graph = %{graph | nodes: graph.nodes ++ [node]}
-    dst = gen_dst_conn(graph, {node.id, input})
+    dst = gen_dst_link(graph, {node.id, input})
 
-    %{graph | connections: graph.connections ++ [{src, dst}]}
+    %{graph | links: graph.links ++ [{src, dst}]}
   end
   def run(_, _, _) do
     raise CompileError, description: "Invalid run/3 usage"
@@ -174,8 +163,8 @@ defmodule Cuda.Graph do
   Validates graph.
   """
   @spec validate!(graph :: t) :: no_return
-  def validate!(%__MODULE__{connections: connections, nodes: nodes}) do
-    inputs = connections |> Enum.count(fn
+  def validate!(%__MODULE__{links: links, nodes: nodes}) do
+    inputs = links |> Enum.count(fn
       {:input, _} -> true
       _           -> false
     end)
@@ -183,7 +172,7 @@ defmodule Cuda.Graph do
       raise CompileError, description: "There are should be exectly one " <>
                                        "connection from graph input"
     end
-    outputs = connections |> Enum.count(fn
+    outputs = links |> Enum.count(fn
       {_, :output} -> true
       _            -> false
     end)
@@ -193,10 +182,10 @@ defmodule Cuda.Graph do
     end
     available = nodes
                 |> Enum.reduce([], fn node, acc ->
-                  Enum.map(node.connectors, & {node.id, &1.id}) ++ acc
+                  Enum.map(node.pins, & {node.id, &1.id}) ++ acc
                 end)
                 |> MapSet.new
-    used = connections
+    used = links
            |> Enum.map(&Tuple.to_list/1)
            |> List.flatten
            |> MapSet.new
@@ -208,7 +197,7 @@ defmodule Cuda.Graph do
                     |> Enum.into([])
                     |> Enum.map(fn {a, b} -> "#{a}.#{b}" end)
                     |> Enum.join(", ")
-      raise CompileError, description: "There are unconnected connectors: "
+      raise CompileError, description: "There are unconnected pins: "
                                        <> unconnected
     end
     true
@@ -217,8 +206,8 @@ defmodule Cuda.Graph do
     raise CompileError, description: "Invalid graph"
   end
 
-  defp available_connector(graph, node, type) do
-    used = graph.connections
+  defp available_pin(graph, node, type) do
+    used = graph.links
            |> Enum.reduce(MapSet.new, fn
              {{_, a}, {_, b}}, m -> m |> MapSet.put(a) |> MapSet.put(b)
              {{_, a}, _}, m      -> m |> MapSet.put(a)
@@ -226,111 +215,111 @@ defmodule Cuda.Graph do
              _, m                -> m
            end)
     node
-    |> Node.connectors(type)
+    |> Node.get_pins(type)
     |> Enum.reject(& MapSet.member?(used, &1.id))
     |> List.first
   end
 
   # if there are no nodes in the graph then assume :input as source connector
-  defp gen_src_conn(%__MODULE__{nodes: []}, nil), do: :input
+  defp gen_src_link(%__MODULE__{nodes: []}, nil), do: :input
   # expicit connector specified for current_node
-  defp gen_src_conn(graph, {%Node{} = node, conn_id}) do
-    conn = case conn_id do
-      nil     -> available_connector(graph, node, :output)
-      conn_id -> node |> Node.connector(conn_id)
+  defp gen_src_link(graph, {%Node{} = node, pin_id}) do
+    pin = case pin_id do
+      nil    -> available_pin(graph, node, :output)
+      pin_id -> node |> Node.get_pin(pin_id)
     end
-    if is_nil(conn) do
-      raise CompileError, description: "Connector #{conn_id} does not " <>
+    if is_nil(pin) do
+      raise CompileError, description: "Pin #{pin_id} does not " <>
                                        "exists in node #{node.id}"
     end
-    if not conn.type in @src_conn_types do
-      raise CompileError, description: "Connector #{node.id}.#{conn.id} has " <>
+    if not pin.type in @src_pin_types do
+      raise CompileError, description: "Pin #{node.id}.#{pin.id} has " <>
                                        "wrong type"
     end
-    {node.id, conn.id}
+    {node.id, pin.id}
   end
   # reject attempts to get source in empty graph
-  defp gen_src_conn(%__MODULE__{nodes: []}, _) do
+  defp gen_src_link(%__MODULE__{nodes: []}, _) do
     raise CompileError, description: "source option should not be used in " <>
                                      "the first operation"
   end
   # explicit node-connector
-  defp gen_src_conn(graph, {node_id, conn_id}) do
+  defp gen_src_link(graph, {node_id, pin_id}) do
     node = node(graph, node_id)
     if is_nil(node) do
       raise CompileError, description: "Node #{node_id} does not exists in " <>
                                        "graph"
     end
-    gen_src_conn(graph, {node, conn_id})
+    gen_src_link(graph, {node, pin_id})
   end
   # node is previous node
-  defp gen_src_conn(%__MODULE__{nodes: nodes} = graph, conn_id) do
+  defp gen_src_link(%__MODULE__{nodes: nodes} = graph, pin_id) do
     node = List.last(nodes)
-    conn = case conn_id do
-      nil    -> available_connector(graph, node, :output)
-      output -> node |> Node.connector(output)
+    pin = case pin_id do
+      nil    -> available_pin(graph, node, :output)
+      output -> node |> Node.get_pin(output)
     end
-    if is_nil(conn) do
+    if is_nil(pin) do
       raise CompileError, description: "There are no available outputs in " <>
                                        "node #{inspect node} to connect to "
     end
-    if not conn.type in @src_conn_types do
-      raise CompileError, description: "Connector #{node.id}.#{conn.id} has " <>
+    if not pin.type in @src_pin_types do
+      raise CompileError, description: "Connector #{node.id}.#{pin.id} has " <>
                                        "wrong type"
     end
-    {node.id, conn.id}
+    {node.id, pin.id}
   end
-  defp gen_src_conn(_, _) do
+  defp gen_src_link(_, _) do
     raise CompileError, description: "There are no available outputs to " <>
                                      "connect to"
   end
 
   # connector should be selected automaticaly in current node
-  defp gen_dst_conn(_, {%Node{} = node, nil}) do
-    conn = node |> Node.connectors(:input) |> List.first
-    if is_nil(conn) do
+  defp gen_dst_link(_, {%Node{} = node, nil}) do
+    pin = node |> Node.get_pins(:input) |> List.first
+    if is_nil(pin) do
       raise CompileError, description: "There are no available destination " <>
-                                       "connectors in node #{node.id}"
+                                       "pins in node #{node.id}"
     end
-    {node.id, conn.id}
+    {node.id, pin.id}
   end
   # explicit current_node-connector
-  defp gen_dst_conn(_, {%Node{} = node, conn_id}) do
-    conn = Node.connector(node, conn_id)
-    if is_nil(conn) do
-      raise CompileError, description: "Connector #{conn_id} does not " <>
+  defp gen_dst_link(_, {%Node{} = node, pin_id}) do
+    pin = Node.get_pin(node, pin_id)
+    if is_nil(pin) do
+      raise CompileError, description: "Connector #{pin_id} does not " <>
                                        "exists in node #{node.id}"
     end
-    if not conn.type in @dst_conn_types do
-      raise CompileError, description: "Connector #{node.id}.#{conn_id} has " <>
+    if not pin.type in @dst_pin_types do
+      raise CompileError, description: "Connector #{node.id}.#{pin_id} has " <>
                                        "wrong type"
     end
-    {node.id, conn.id}
+    {node.id, pin.id}
   end
   # explicit node-connector
-  defp gen_dst_conn(graph, {node_id, conn_id}) do
+  defp gen_dst_link(graph, {node_id, pin_id}) do
     node = node(graph, node_id)
     if is_nil(node) do
       raise CompileError, description: "Node #{node_id} does not exists in " <>
                                        "graph"
     end
-    gen_dst_conn(nil, {node, conn_id})
+    gen_dst_link(nil, {node, pin_id})
   end
   # node specified, connector should be selected automaticaly
-  defp gen_dst_conn(graph, node_id) when not is_nil(node_id) do
+  defp gen_dst_link(graph, node_id) when not is_nil(node_id) do
     node = node(graph, node_id)
     if is_nil(node) do
       raise CompileError, description: "Node #{node_id} does not exists in " <>
                                        "graph"
     end
-    conn = available_connector(graph, node, :input)
-    if is_nil(conn) do
+    pin = available_pin(graph, node, :input)
+    if is_nil(pin) do
       raise CompileError, description: "There are no available destination " <>
-                                       "connectors in node #{node_id}"
+                                       "pins in node #{node_id}"
     end
-    {node_id, conn.id}
+    {node_id, pin.id}
   end
-  defp gen_dst_conn(_, nil) do
+  defp gen_dst_link(_, nil) do
     raise CompileError, description: "Invalid destination specified"
   end
 end

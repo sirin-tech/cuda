@@ -1,4 +1,4 @@
-defmodule Cuda.Graph.Connector do
+defmodule Cuda.Graph.Pin do
   @moduledoc """
   Represents evaluation graph node connector.
   """
