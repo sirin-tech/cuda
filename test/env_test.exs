@@ -7,7 +7,7 @@ defmodule EnvTest do
     test "env map with default values" do
       default = Map.merge(%Cuda.Env{}, get_default())
 
-      assert {:ok, default} == create
+      assert {:ok, default} == create()
     end
   end
 
