@@ -3,25 +3,36 @@ defmodule Cuda.Graph do
   Represents evaluation graph
   """
 
+  alias Cuda.Graph.Pin
   alias Cuda.Graph.Node
 
   @type id :: String.t | atom | non_neg_integer
-  @type link :: id | {id, id}
+  @type link :: {id, id}
 
   @type t :: %__MODULE__{
     id: id,
+    module: module,
+    type: Node.type,
+    pins: [Pin.t],
     nodes: [Node.t],
-    links: [{id | :input, id | :output}]
+    links: [{link, link}],
   }
 
   @callback __graph__(graph :: t, opts :: keyword, env :: keyword) :: t
 
-  @exports [connect: 2, connect: 3,
-            #output: 1, output: 2,
-            run: 2, run: 3]
+  defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: []]
 
-  @src_pin_types ~w(output producer)a
-  @dst_pin_types ~w(input consumer)a
+  @self :__self__
+  @input_pins  ~w(input consumer)a
+  @output_pins ~w(output producer)a
+
+  defmacrop error(msg) do
+    quote do
+      raise CompileError, description: unquote(msg)
+    end
+  end
+
+  @exports [add: 3, add: 4, add: 5, link: 3]
 
   defmacro __using__(_opts) do
     quote do
@@ -32,7 +43,310 @@ defmodule Cuda.Graph do
     end
   end
 
-  defstruct [:id, nodes: [], links: []]
+  @doc """
+  Creates new graph node
+  """
+  @spec new(id :: id, module :: module, opts :: keyword, env :: keyword) :: t
+  def new(id, module, opts \\ [], env \\ []) do
+    graph = Node.new(id, module, opts, env) |> Map.from_struct
+    graph = struct(__MODULE__, graph)
+    graph = case function_exported?(module, :__graph__, 3) do
+      true -> module.__graph__(graph, opts, env)
+      _    -> graph
+    end
+    # graph = graph |> Graph.expand()
+    graph
+  end
+
+  def add(%__MODULE__{} = graph, id, module, opts \\ [], env \\ []) do
+    add(graph, Node.new(id, module, opts, env))
+  end
+
+  def add(%__MODULE__{nodes: nodes} = graph, %{id: id} = node) do
+    with nil <- node(graph, id) do
+      %{graph | nodes: [node | nodes]}
+    else
+      _ -> error("Node with id `#{id}` is already in the graph")
+    end
+  end
+
+  def link(%__MODULE__{links: links} = graph, {sn, sp} = src, {dn, dp} = dst) do
+    # node to node connection
+    with {:src, %{} = src_node} <- {:src, node(graph, sn)},
+         {:dst, %{} = dst_node} <- {:dst, node(graph, dn)} do
+      src_pin = assert_pin_type(src_node, sp, @output_pins)
+      dst_pin = assert_pin_type(dst_node, dp, @input_pins)
+      assert_pin_data_type(src_pin, dst_pin)
+      %{graph | links: [{src, dst} | links]}
+    else
+      {:src, _} -> error("Source node `#{sn}` not found")
+      {:dst, _} -> error("Destination node `#{dn}` not found")
+    end
+  end
+
+  def link(%__MODULE__{links: links} = graph, src, {dn, dp} = dst) do
+    # input to node connection
+    with %{} = dst_node <- node(graph, dn) do
+      src_pin = assert_pin_type(graph, src, @input_pins)
+      dst_pin = assert_pin_type(dst_node, dp, @input_pins)
+      assert_pin_data_type(src_pin, dst_pin)
+      %{graph | links: [{{@self, src}, dst} | links]}
+    else
+      _ -> error("Destination node `#{dn}` not found")
+    end
+  end
+
+  def link(%__MODULE__{links: links} = graph, {sn, sp} = src, dst) do
+    # node to output connection
+    with %{} = src_node <- node(graph, sn) do
+      src_pin = assert_pin_type(graph, dst, @output_pins)
+      dst_pin = assert_pin_type(src_node, sp, @output_pins)
+      assert_pin_data_type(src_pin, dst_pin)
+      %{graph | links: [{src, {@self, dst}} | links]}
+    else
+      _ -> error("Source node `#{sn}` not found")
+    end
+  end
+
+  def link(%__MODULE__{links: links} = graph, src, dst) do
+    # input to output connection
+    src_pin = assert_pin_type(graph, src, @input_pins)
+    dst_pin = assert_pin_type(graph, dst, @output_pins)
+    assert_pin_data_type(src_pin, dst_pin)
+    %{graph | links: [{{@self, src}, {@self, dst}} | links]}
+  end
+
+  def dfs(graph, callback, state \\ %{})
+  def dfs(%__MODULE__{} = graph, callback, state) do
+    st = %{graph: graph, nodes: [], state: state}
+    result = graph |> Node.get_pins(:input) |> Enum.reduce({:ok, st}, fn
+      %Pin{id: id}, {:ok, st} -> dfs({:__self__, id}, callback, {:ok, st})# |> IO.inspect
+      _, result -> result
+    end)
+    case result do
+      {:error, _} = err -> err
+      {action, st} -> {action, st.state}
+      result       -> error("Unexpected result `#{inspect result}` returned from `dfs`")
+    end
+  end
+  def dfs(node_spec, callback, {:ok, st}) do
+    # IO.inspect(node_spec, label: :IN)
+
+    # get node from graph by node_spec
+    node = node_and_pin_by_spec(st.graph, node_spec)
+
+    # yield callback if this is a first loopkup of node
+    result = if not node_spec in st.nodes do
+      with {:ok, st} <- yield(callback, :enter, node, st) do
+        {:ok, %{st | nodes: [node_spec | st.nodes]}}
+      end
+    else
+      {:ok, st}
+    end
+    with {:ok, st} <- result do
+      result = node_spec |> dfs_next_spec(st.graph) |> Enum.reduce({:ok, st}, fn
+        next, {:ok, st} ->
+          next = Enum.filter(st.graph.links, fn
+            {^next, dst} -> dst
+            _ -> nil
+          end)
+          case next do
+            [] ->
+              error("unconnected pin detected")
+            next ->
+              next |> Enum.reduce({:ok, st}, fn
+                {_, dst_spec}, {:ok, st} ->
+                  case dst_spec in st.nodes do
+                    false ->
+                      dst = node_and_pin_by_spec(st.graph, dst_spec)
+                      with {:ok, st} <- yield(callback, :move, {node, dst}, st) do
+                        # st = %{st | nodes: [dst | st.nodes]}
+                        dfs(dst_spec, callback, {:ok, st})
+                      end
+                    _ ->
+                      {:ok, st}
+                      # {:error, :loop}
+                  end
+                _, result ->
+                  result
+              end)
+          end
+        _, result -> result
+      end)
+      with {:ok, st} <- result do
+        yield(callback, :leave, node, st)
+      end
+    end
+  end
+  def dfs(_, _, result), do: result
+
+  def topology_sort(graph) do
+    with false <- loop?(graph) do
+      dfs(graph, fn
+        :leave, {%{id: node}, %{id: pin}}, st -> {:ok, [{node, pin} | st]}
+        _, _, st                             -> {:ok, st}
+      end, [])
+    else
+      true  -> {:error, :loop}
+      error -> error
+    end
+  end
+
+  def loop?(graph) do
+    result = dfs(graph, fn
+      # graph input visited - reset chain
+      :enter, {%__MODULE__{}, %{type: type}}, _ when type in @input_pins ->
+        {:ok, MapSet.new()}
+      # graph output visited - skip
+      :enter, {%__MODULE__{}, _}, chain ->
+        {:ok, chain}
+      # node visited - add it to chain
+      :enter, {%{id: node}, _}, chain ->
+        {:ok, MapSet.put(chain, node)}
+      # move from graph input - skip
+      :move, {{%__MODULE__{}, _}, _}, chain ->
+        {:ok, chain}
+      # move to graph output - skip
+      :move, {_, {%__MODULE__{}, _}}, chain ->
+        {:ok, chain}
+      # move to node - check if node already in chain
+      :move, {_, {%{id: to}, _}}, chain ->
+        if MapSet.member?(chain, to) do
+          {:stop, true}
+        else
+          {:ok, chain}
+        end
+      # leave graph input or output - skip
+      :leave, {%__MODULE__{}, _}, chain ->
+        {:ok, chain}
+      # leave node - pop it from chain
+      :leave, {%{id: node}, _}, chain ->
+        {:ok, MapSet.delete(chain, node)}
+    end, MapSet.new())
+    with {:stop, result} <- result do
+      result
+    else
+      _ -> false
+    end
+  end
+
+  def expand(%__MODULE__{nodes: nodes, links: links} = graph) do
+    {nodes, links} = Enum.flat_map_reduce(nodes, links, fn
+      %{id: gid, type: :graph} = g, links ->
+        g = g |> expand()
+        nodes = g.nodes |> Enum.map(& expand_id(&1, gid))
+        g_links = g.links |> Enum.map(& expand_link(&1, gid))
+        links = g_links |> Enum.reduce(links, fn
+          {{:__self__, spin}, {:__self__, dpin}}, links ->
+            {src, dst, links} = Enum.reduce(links, {nil, [], []}, fn
+              {{^gid, ^spin} = src, _}, {_, dst, links} -> {src, dst, links}
+              {_, {^gid, ^dpin} = d}, {src, dst, links} -> {src, [d | dst], links}
+              link, {src, dst, links} -> {src, dst, [link | links]}
+            end)
+            links ++ Enum.map(dst, & {src, &1})
+          {{:__self__, pin}, dst}, links ->
+            links |> replace_dst({gid, pin}, dst)
+          {src, {:__self__, pin}}, links ->
+            links |> replace_src({gid, pin}, src)
+          x, links -> [x | links]
+        end)
+        {nodes, links}
+      node, links ->
+        {[node], links}
+    end)
+    graph = %{graph | nodes: nodes, links: links}
+    if loop?(graph), do: raise error("loop detected in expanded graph")
+    graph
+  end
+
+  defp replace_dst(links, from, to) do
+    links |> Enum.map(fn
+      {src, ^from} -> {src, to}
+      x            -> x
+    end)
+  end
+
+  defp replace_src(links, from, to) do
+    links |> Enum.map(fn
+      {^from, dst} -> {to, dst}
+      x            -> x
+    end)
+  end
+
+  defp expand_id(%{id: id} = node, gid) do
+    %{node | id: expand_node_id(id, gid)}
+  end
+  defp expand_id(node, _) do
+    node
+  end
+
+  defp expand_node_id(t, gid) when is_tuple(t) do
+    [gid | Tuple.to_list(t)] |> List.to_tuple
+  end
+  defp expand_node_id(id, gid) do
+    {gid, id}
+  end
+
+  defp expand_link({{:__self__, _} = src, {:__self__, _} = dst}, _) do
+    {src, dst}
+  end
+  defp expand_link({{:__self__, _} = src, {dst_node, dst_pin}}, gid) do
+    {src, {expand_node_id(dst_node, gid), dst_pin}}
+  end
+  defp expand_link({{src_node, src_pin}, {:__self__, _} = dst}, gid) do
+    {{expand_node_id(src_node, gid), src_pin}, dst}
+  end
+  defp expand_link({{src_node, src_pin}, {dst_node, dst_pin}}, gid) do
+    {{expand_node_id(src_node, gid), src_pin},
+     {expand_node_id(dst_node, gid), dst_pin}}
+  end
+
+  defp node_and_pin_by_spec(graph, {:__self__, pin}) do
+    {graph, Node.get_pin(graph, pin)}
+  end
+  defp node_and_pin_by_spec(graph, {node, pin}) do
+    node = node(graph, node)
+    {node, Node.get_pin(node, pin)}
+  end
+
+  defp dfs_next_spec({:__self__, pin} = node_spec, graph) do
+    case Node.get_pin(graph, pin) do
+      %Pin{type: :input} -> [node_spec]
+      _ -> []
+    end
+  end
+  defp dfs_next_spec({node_id, _}, graph) do
+    case node(graph, node_id) do
+      nil -> []
+      node -> @output_pins |> Enum.flat_map(& Node.get_pins(node, &1)) |> Enum.map(& {node_id, &1.id})
+    end
+  end
+
+  defp yield(callback, action, arg, st) do
+    case callback.(action, arg, st.state) do
+      {action, state} -> {action, %{st | state: state}}
+      _ -> error("Unexpected result returned from `dfs` callback")
+    end
+  end
+
+  defp assert_pin_type(node, pin_name, types) do
+    with %Pin{} = pin <- Node.get_pin(node, pin_name) do
+      if not pin.type in types do
+        types = types |> Enum.map(& "#{&1}") |> Enum.join(" or ")
+        error("Pin `#{pin_name}` of node `#{node.id}` has a wrong type. " <>
+              "The #{types} types are expected.")
+      end
+      pin
+    else
+      _ -> error("Pin `#{pin_name}` not found in node `#{node.id}`")
+    end
+  end
+
+  defp assert_pin_data_type(%{data_type: t1} = p1, %{data_type: t2} = p2) do
+    if t1 != t2 do
+      error("The pins #{p1.id} and #{p2.id} has different types")
+    end
+  end
 
   @spec gen_id() :: id
   def gen_id do
@@ -40,286 +354,14 @@ defmodule Cuda.Graph do
   end
 
   @doc """
-  Creates new evaluation graph
-  """
-  @spec new(module :: module, opts :: keyword, env :: keyword) :: t
-  def new(module, opts \\ [], env \\ []) do
-    graph = Node.new(module, opts, env) |> Map.from_struct
-    graph = struct(__MODULE__, graph)
-    graph = case function_exported?(module, :__graph__, 3) do
-      true -> module.__graph__(graph, opts, env)
-      _    -> graph
-    end
-    validate!(graph)
-    graph
-  end
-
-  @doc """
-  Returns node by its name
+  Returns node in the graph by its name
   """
   @spec node(graph :: t, id :: id) :: Node.t
   def node(%__MODULE__{nodes: nodes}, id) do
     nodes |> Enum.find(fn
-      %Node{id: ^id} -> true
-      _              -> false
+      %{id: ^id} -> true
+      _          -> false
     end)
   end
   def node(_, _), do: nil
-
-  @doc """
-  Creates a graph output.
-  """
-  @spec output(graph :: t) :: t
-  @spec output(graph :: t, src :: link) :: t
-  def output(graph, src \\ nil)
-  def output(%__MODULE__{links: links} = graph, src) do
-    src = gen_src_link(graph, src)
-    %{graph | links: links ++ [{src, :output}]}
-  end
-  def output(_, _) do
-    raise CompileError, description: "Invalid output/2 usage"
-  end
-
-  @doc """
-  Connects two nodes.
-
-  If one argument is specified then its used as a destination node. In this case
-  last node in the graph or graph input (if there are no nodes in the graph)
-  will be used as a source node.
-
-  If two arguments is specified then first argument is a source node and second
-  is a destination.
-
-  To specify exact input or output use {node_name, pin_name} tuple.
-  """
-  @spec connect(graph :: t, dst :: link) :: t
-  @spec connect(graph :: t, src :: link, dst :: link) :: t
-  def connect(graph, src, dst \\ nil)
-  def connect(%__MODULE__{links: links} = graph, src, dst) do
-    {src, dst} = if is_nil(dst), do: {nil, src}, else: {src, dst}
-    src = case {src, dst} do
-      # one arg form - src contains pin_id
-      {_, nil} -> gen_src_link(graph, src)
-      # two args from
-      # src contains {node_id, pin_id}
-      {src, _} when is_tuple(src) -> gen_src_link(graph, src)
-      # src not specified - use previous node and guess connector
-      {nil, _} -> gen_src_link(graph, nil)
-      # src contains node_id, connector should be guessed
-      {src, _} -> gen_src_link(graph, {src, nil})
-    end
-    dst = gen_dst_link(graph, dst)
-    %{graph | links: links ++ [{src, dst}]}
-  end
-  def connect(_, _, _) do
-    raise CompileError, description: "Invalid connect/3 usage"
-  end
-
-  @doc """
-  Adds specified module as an operation node to evaluation graph and connects
-  its input to output of last node (named 'source node') in the graph.
-
-  You can specify node name with `name` option. If not specified then it will
-  be filled with a random UUID.
-
-  If source node has several outputs and you want to get data from the specified
-  output specify output name in `source` option. Firstly created operation is
-  automatically connected to graph input and you should not use a `source`
-  option in the frist `run/3` call. Also `source` can be specified in the
-  {node_name, pin_name} form.
-
-  If newly created node has several inputs and you want to connect source node
-  to specified input, specify input name in the `input` option. In this case
-  other inputs remains unconnected and you should connect it later with the
-  `connect/3` function.
-
-  You can use `source` and `input` options together.
-
-  Returns updated graph, so you can chain several operations like this:
-
-  ```
-  input |> run(SomeOperation) |> run(OtherOperation) |> output
-  ```
-  """
-  @spec run(graph :: t, module :: module) :: t
-  @spec run(graph :: t, module :: module, options :: keyword) :: t
-  def run(graph, module, opts \\ [])
-  def run(%__MODULE__{} = graph, module, opts) do
-    {input, opts}  = Keyword.pop(opts, :input)
-    {source, opts} = Keyword.pop(opts, :source)
-
-    node = Node.new(module, opts)
-    src = gen_src_link(graph, source)
-    graph = %{graph | nodes: graph.nodes ++ [node]}
-    dst = gen_dst_link(graph, {node.id, input})
-
-    %{graph | links: graph.links ++ [{src, dst}]}
-  end
-  def run(_, _, _) do
-    raise CompileError, description: "Invalid run/3 usage"
-  end
-
-  @doc """
-  Validates graph.
-  """
-  @spec validate!(graph :: t) :: no_return
-  def validate!(%__MODULE__{links: links, nodes: nodes}) do
-    inputs = links |> Enum.count(fn
-      {:input, _} -> true
-      _           -> false
-    end)
-    if inputs != 1 do
-      raise CompileError, description: "There are should be exectly one " <>
-                                       "connection from graph input"
-    end
-    outputs = links |> Enum.count(fn
-      {_, :output} -> true
-      _            -> false
-    end)
-    if outputs != 1 do
-      raise CompileError, description: "There are should be exectly one " <>
-                                       "connection to graph output"
-    end
-    available = nodes
-                |> Enum.reduce([], fn node, acc ->
-                  Enum.map(node.pins, & {node.id, &1.id}) ++ acc
-                end)
-                |> MapSet.new
-    used = links
-           |> Enum.map(&Tuple.to_list/1)
-           |> List.flatten
-           |> MapSet.new
-           |> MapSet.delete(:input)
-           |> MapSet.delete(:output)
-    unconnected = MapSet.difference(available, used)
-    if MapSet.size(unconnected) > 0 do
-      unconnected = unconnected
-                    |> Enum.into([])
-                    |> Enum.map(fn {a, b} -> "#{a}.#{b}" end)
-                    |> Enum.join(", ")
-      raise CompileError, description: "There are unconnected pins: "
-                                       <> unconnected
-    end
-    true
-  end
-  def validate!(_) do
-    raise CompileError, description: "Invalid graph"
-  end
-
-  defp available_pin(graph, node, type) do
-    used = graph.links
-           |> Enum.reduce(MapSet.new, fn
-             {{_, a}, {_, b}}, m -> m |> MapSet.put(a) |> MapSet.put(b)
-             {{_, a}, _}, m      -> m |> MapSet.put(a)
-             {_, {_, a}}, m      -> m |> MapSet.put(a)
-             _, m                -> m
-           end)
-    node
-    |> Node.get_pins(type)
-    |> Enum.reject(& MapSet.member?(used, &1.id))
-    |> List.first
-  end
-
-  # if there are no nodes in the graph then assume :input as source connector
-  defp gen_src_link(%__MODULE__{nodes: []}, nil), do: :input
-  # expicit connector specified for current_node
-  defp gen_src_link(graph, {%Node{} = node, pin_id}) do
-    pin = case pin_id do
-      nil    -> available_pin(graph, node, :output)
-      pin_id -> node |> Node.get_pin(pin_id)
-    end
-    if is_nil(pin) do
-      raise CompileError, description: "Pin #{pin_id} does not " <>
-                                       "exists in node #{node.id}"
-    end
-    if not pin.type in @src_pin_types do
-      raise CompileError, description: "Pin #{node.id}.#{pin.id} has " <>
-                                       "wrong type"
-    end
-    {node.id, pin.id}
-  end
-  # reject attempts to get source in empty graph
-  defp gen_src_link(%__MODULE__{nodes: []}, _) do
-    raise CompileError, description: "source option should not be used in " <>
-                                     "the first operation"
-  end
-  # explicit node-connector
-  defp gen_src_link(graph, {node_id, pin_id}) do
-    node = node(graph, node_id)
-    if is_nil(node) do
-      raise CompileError, description: "Node #{node_id} does not exists in " <>
-                                       "graph"
-    end
-    gen_src_link(graph, {node, pin_id})
-  end
-  # node is previous node
-  defp gen_src_link(%__MODULE__{nodes: nodes} = graph, pin_id) do
-    node = List.last(nodes)
-    pin = case pin_id do
-      nil    -> available_pin(graph, node, :output)
-      output -> node |> Node.get_pin(output)
-    end
-    if is_nil(pin) do
-      raise CompileError, description: "There are no available outputs in " <>
-                                       "node #{inspect node} to connect to "
-    end
-    if not pin.type in @src_pin_types do
-      raise CompileError, description: "Connector #{node.id}.#{pin.id} has " <>
-                                       "wrong type"
-    end
-    {node.id, pin.id}
-  end
-  defp gen_src_link(_, _) do
-    raise CompileError, description: "There are no available outputs to " <>
-                                     "connect to"
-  end
-
-  # connector should be selected automaticaly in current node
-  defp gen_dst_link(_, {%Node{} = node, nil}) do
-    pin = node |> Node.get_pins(:input) |> List.first
-    if is_nil(pin) do
-      raise CompileError, description: "There are no available destination " <>
-                                       "pins in node #{node.id}"
-    end
-    {node.id, pin.id}
-  end
-  # explicit current_node-connector
-  defp gen_dst_link(_, {%Node{} = node, pin_id}) do
-    pin = Node.get_pin(node, pin_id)
-    if is_nil(pin) do
-      raise CompileError, description: "Connector #{pin_id} does not " <>
-                                       "exists in node #{node.id}"
-    end
-    if not pin.type in @dst_pin_types do
-      raise CompileError, description: "Connector #{node.id}.#{pin_id} has " <>
-                                       "wrong type"
-    end
-    {node.id, pin.id}
-  end
-  # explicit node-connector
-  defp gen_dst_link(graph, {node_id, pin_id}) do
-    node = node(graph, node_id)
-    if is_nil(node) do
-      raise CompileError, description: "Node #{node_id} does not exists in " <>
-                                       "graph"
-    end
-    gen_dst_link(nil, {node, pin_id})
-  end
-  # node specified, connector should be selected automaticaly
-  defp gen_dst_link(graph, node_id) when not is_nil(node_id) do
-    node = node(graph, node_id)
-    if is_nil(node) do
-      raise CompileError, description: "Node #{node_id} does not exists in " <>
-                                       "graph"
-    end
-    pin = available_pin(graph, node, :input)
-    if is_nil(pin) do
-      raise CompileError, description: "There are no available destination " <>
-                                       "pins in node #{node_id}"
-    end
-    {node_id, pin.id}
-  end
-  defp gen_dst_link(_, nil) do
-    raise CompileError, description: "Invalid destination specified"
-  end
 end

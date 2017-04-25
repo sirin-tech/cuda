@@ -117,9 +117,9 @@ defmodule Cuda.Graph.Node do
   @doc """
   Creates a new evaluation node
   """
-  @spec new(module :: module, options :: keyword, env :: keyword) :: t
-  def new(module, opts \\ [], env \\ []) do
-    id = Keyword.get(opts, :name, Graph.gen_id())
+  @spec new(id :: Graph.id, module :: module, options :: keyword, env :: keyword) :: t
+  def new(id, module, opts \\ [], env \\ []) do
+    # id = Keyword.get(opts, :name, Graph.gen_id())
     if id in @reserved_names do
       raise CompileError, description: "Reserved node name '#{id}' used"
     end
@@ -149,7 +149,7 @@ defmodule Cuda.Graph.Node do
   def get_pin(%{pins: pins}, id) do
     pins |> Enum.find(fn
       %Pin{id: ^id} -> true
-      _                   -> false
+      _             -> false
     end)
   end
   def get_pin(_, _), do: nil
@@ -160,10 +160,10 @@ defmodule Cuda.Graph.Node do
   def get_pins(%{pins: pins}, type) do
     pins |> Enum.filter(fn
       %Pin{type: ^type} -> true
-      _                       -> false
+      _                 -> false
     end)
   end
-  def pins(_, _), do: nil
+  def get_pins(_, _), do: nil
 
   defp valid_pin?(%Pin{}), do: true
   defp valid_pin?(_), do: false
