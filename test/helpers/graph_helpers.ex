@@ -1,4 +1,4 @@
-defmodule Cuda.Test.GraphHelper do
+defmodule Cuda.Test.GraphHelpers do
   @moduledoc """
   Represents helper functions for testing Cuda.Graph module
   """

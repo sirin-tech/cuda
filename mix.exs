@@ -8,6 +8,7 @@ defmodule Cuda.Mixfile do
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      compilers: [:port, :elixir, :app],
+     elixirc_paths: paths(),
      deps: deps(),
      aliases: aliases(),
      docs: docs()]
@@ -32,6 +33,10 @@ defmodule Cuda.Mixfile do
     [main: "Cuda",
      #logo: "path/to/logo.png",
      extras: ["README.md"]]
+  end
+
+  defp paths do
+    ["lib", Path.join(~w(test helpers))]
   end
 end
 

@@ -280,20 +280,34 @@ defmodule Cuda.Graph do
   end
 
   defp longest_chain(graph, type, node, current \\ [], max \\ []) do
-    outnodes = lc_out_nodes(graph, node)
-    {current, max} = if node.type == type do
-      {current ++ [node], max}
-    else
-      {[], lc_max_list(current, max)}
+    #outnodes = lc_out_nodes(graph, node)
+    #{current, max} = if node.type == type do
+    #  {current ++ [node], max}
+    #else
+    #  {[], lc_max_list(current, max)}
+    #end
+    #if length(outnodes) > 0 do
+    #  outnodes
+    #  |> Enum.reduce([], fn n, acc ->
+    #    chain = longest_chain(graph, type, n, current, max)
+    #    lc_max_list(chain, acc)
+    #  end)
+    #else
+    #  lc_max_list(current, max)
+    #end
+
+    {current, max} = case node.type do
+      ^type -> {current ++ [node], max}
+      _     -> {[], lc_max_list(current, max)}
     end
-    if length(outnodes) > 0 do
-      outnodes
-      |> Enum.reduce([], fn n, acc ->
-        chain = longest_chain(graph, type, n, current, max)
-        lc_max_list(chain, acc)
-      end)
-    else
-      lc_max_list(current, max)
+    case lc_out_nodes(graph, node) do
+      [] ->
+        lc_max_list(current, max)
+      outnodes ->
+        Enum.reduce(outnodes, [], fn n, acc ->
+          chain = longest_chain(graph, type, n, current, max)
+          lc_max_list(chain, acc)
+        end)
     end
   end
 
