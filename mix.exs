@@ -36,7 +36,7 @@ defmodule Cuda.Mixfile do
   end
 
   defp paths do
-    ["lib", Path.join(~w(test helpers))]
+    ["lib", Path.join(~w(test support))]
   end
 end
 

@@ -119,28 +119,32 @@ defmodule Cuda.Graph.Node do
   """
   @spec new(id :: Graph.id, module :: module, options :: keyword, env :: keyword) :: t
   def new(id, module, opts \\ [], env \\ []) do
-    # id = Keyword.get(opts, :name, Graph.gen_id())
-    if id in @reserved_names do
-      raise CompileError, description: "Reserved node name '#{id}' used"
-    end
+    with {:module, module} <- Code.ensure_loaded(module) do
+      # id = Keyword.get(opts, :name, Graph.gen_id())
+      if id in @reserved_names do
+        raise CompileError, description: "Reserved node name '#{id}' used"
+      end
 
-    type = case function_exported?(module, :__type__, 2) do
-      true -> module.__type__(opts, env)
-      _    -> :virtual
-    end
-    if not type in @types do
-      raise CompileError, description: "Unsupported type: #{inspect type}"
-    end
+      type = case function_exported?(module, :__type__, 2) do
+        true -> module.__type__(opts, env)
+        _    -> :virtual
+      end
+      if not type in @types do
+        raise CompileError, description: "Unsupported type: #{inspect type}"
+      end
 
-    pins = case function_exported?(module, :__pins__, 2) do
-      true -> module.__pins__(opts, env)
-      _    -> []
-    end
-    if not is_list(pins) or not Enum.all?(pins, &valid_pin?/1) do
-      raise CompileError, description: "Invalid connector list supploed"
-    end
+      pins = case function_exported?(module, :__pins__, 2) do
+        true -> module.__pins__(opts, env)
+        _    -> []
+      end
+      if not is_list(pins) or not Enum.all?(pins, &valid_pin?/1) do
+        raise CompileError, description: "Invalid connector list supploed"
+      end
 
-    struct(__MODULE__, id: id, module: module, type: type, pins: pins)
+      struct(__MODULE__, id: id, module: module, type: type, pins: pins)
+    else
+      _ -> raise CompileError, description: "Node module #{module} could not be loaded"
+    end
   end
 
   @doc false

@@ -48,14 +48,18 @@ defmodule Cuda.Graph do
   """
   @spec new(id :: id, module :: module, opts :: keyword, env :: keyword) :: t
   def new(id, module, opts \\ [], env \\ []) do
-    graph = Node.new(id, module, opts, env) |> Map.from_struct
-    graph = struct(__MODULE__, graph)
-    graph = case function_exported?(module, :__graph__, 3) do
-      true -> module.__graph__(graph, opts, env)
-      _    -> graph
+    with {:module, module} <- Code.ensure_loaded(module) do
+      graph = Node.new(id, module, opts, env) |> Map.from_struct
+      graph = struct(__MODULE__, graph)
+      graph = case function_exported?(module, :__graph__, 3) do
+        true -> module.__graph__(graph, opts, env)
+        _    -> graph
+      end
+      # graph = graph |> Graph.expand()
+      graph
+    else
+      _ -> error("Graph module #{module} could not be loaded")
     end
-    # graph = graph |> Graph.expand()
-    graph
   end
 
   def add(%__MODULE__{} = graph, id, module, opts \\ [], env \\ []) do
