@@ -259,6 +259,67 @@ defmodule Cuda.Graph do
     graph
   end
 
+  @doc """
+  Finds longest node chain with specific type
+  """
+  @spec longest_chain(graph :: t, node_type :: Node.type) :: list
+  def longest_chain(graph, node_type) do
+    graph
+    |> expand
+    |> Node.get_pins(:input)
+    |> Enum.reduce([], fn %Pin{id: id}, acc ->
+      case lc_link(graph, {:__self__, id}) do
+        {_, {:__self__, _}} ->
+          acc
+        {_, {node_id, _}} ->
+          node = node(graph, node_id)
+          chain = longest_chain(graph, node_type, node)
+          lc_max_list(chain, acc)
+      end
+    end)
+  end
+
+  defp longest_chain(graph, type, node, current \\ [], max \\ []) do
+    outnodes = lc_out_nodes(graph, node)
+    {current, max} = if node.type == type do
+      {current ++ [node], max}
+    else
+      {[], lc_max_list(current, max)}
+    end
+    if length(outnodes) > 0 do
+      outnodes
+      |> Enum.reduce([], fn n, acc ->
+        chain = longest_chain(graph, type, n, current, max)
+        lc_max_list(chain, acc)
+      end)
+    else
+      lc_max_list(current, max)
+    end
+  end
+
+  defp lc_link(%{links: links}, link_part) do
+    Enum.find(links, fn
+      {^link_part, _} -> true
+      _               -> false
+    end)
+  end
+
+  defp lc_max_list(list1, list2) do
+    length(list1) > length(list2) && list1 || list2
+  end
+
+  defp lc_out_nodes(graph, node) do
+    node
+    |> Node.get_pins(:output)
+    |> Enum.reduce([], fn %Pin{id: id}, acc ->
+      case lc_link(graph, {node.id, id}) do
+        {_, {:__self__, _}} -> acc
+        {_, {node_id, _}}   -> [node(graph, node_id) | acc]
+      end
+    end)
+    |> Enum.uniq()
+  end
+
   defp replace_dst(links, from, to) do
     links |> Enum.map(fn
       {src, ^from} -> {src, to}
