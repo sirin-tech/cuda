@@ -214,6 +214,36 @@ defmodule GraphTest do
       |> graph()
       |> Graph.longest_chain(:virtual)
       |> length() == 2
+
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      assert :i1_single4_o2
+      |> graph()
+      |> Graph.longest_chain(:virtual)
+      |> length() == 3
+
+      # [i1]──▶[input (a) output]──┬──[input (b) output]───────────────────────▶[o1]
+      #                            └─▶[input (c) output]──▶[input (d) output]──▶[o2]
+      assert :i1_single4_o2_inverse
+      |> graph()
+      |> Graph.longest_chain(:virtual)
+      |> length() == 3
+
+      #      ┌───▶[input (a) output]───▶[input (c) output]───▶[o1]
+      # [i1]─│
+      #      └───▶[input (b) output]─────────────────────────▶[o2]
+      assert :i1_single3_o2
+      |> graph()
+      |> Graph.longest_chain(:virtual)
+      |> length() == 2
+
+      #      ┌───▶[input (a) output]─────────────────────────▶[o1]
+      # [i1]─│
+      #      └───▶[input (b) output]───▶[input (c) output]───▶[o2]
+      assert :i1_single3_o2_inverse
+      |> graph()
+      |> Graph.longest_chain(:virtual)
+      |> length() == 2
     end
 
     test "detects loops" do

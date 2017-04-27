@@ -160,6 +160,80 @@ defmodule Cuda.Test.GraphHelpers do
     |> link(:i, {:x, :input})
     |> link({:x, :output}, :o)
   end
+  # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+  #                            └─▶[input (c) output]───────────────────────▶[o2]
+  def graph(:i1_single4_o2) do
+    graph(id: :graph,
+          pins: [
+            %Pin{id: :i1, type: :input, data_type: :i8},
+            %Pin{id: :o1, type: :output, data_type: :i8},
+            %Pin{id: :o2, type: :output, data_type: :i8}])
+    |> add(Node.new(:a, Single))
+    |> add(Node.new(:b, Single))
+    |> add(Node.new(:c, Single))
+    |> add(Node.new(:d, Single))
+    |> link(:i1, {:a, :input})
+    |> link({:a, :output}, {:b, :input})
+    |> link({:a, :output}, {:c, :input})
+    |> link({:b, :output}, {:d, :input})
+    |> link({:d, :output}, :o1)
+    |> link({:c, :output}, :o2)
+  end
+  # [i1]──▶[input (a) output]──┬──[input (b) output]───────────────────────▶[o1]
+  #                            └─▶[input (c) output]──▶[input (d) output]──▶[o2]
+  def graph(:i1_single4_o2_inverse) do
+    graph(id: :graph,
+          pins: [
+            %Pin{id: :i1, type: :input, data_type: :i8},
+            %Pin{id: :o1, type: :output, data_type: :i8},
+            %Pin{id: :o2, type: :output, data_type: :i8}])
+    |> add(Node.new(:a, Single))
+    |> add(Node.new(:b, Single))
+    |> add(Node.new(:c, Single))
+    |> add(Node.new(:d, Single))
+    |> link(:i1, {:a, :input})
+    |> link({:a, :output}, {:b, :input})
+    |> link({:a, :output}, {:c, :input})
+    |> link({:c, :output}, {:d, :input})
+    |> link({:b, :output}, :o1)
+    |> link({:d, :output}, :o2)
+  end
+  #      ┌───▶[input (a) output]───▶[input (c) output]───▶[o1]
+  # [i1]─│
+  #      └───▶[input (b) output]─────────────────────────▶[o2]
+  def graph(:i1_single3_o2) do
+    graph(id: :graph,
+          pins: [
+            %Pin{id: :i1, type: :input, data_type: :i8},
+            %Pin{id: :o1, type: :output, data_type: :i8},
+            %Pin{id: :o2, type: :output, data_type: :i8}])
+    |> add(Node.new(:a, Single))
+    |> add(Node.new(:b, Single))
+    |> add(Node.new(:c, Single))
+    |> link(:i1, {:a, :input})
+    |> link(:i1, {:b, :input})
+    |> link({:a, :output}, {:c, :input})
+    |> link({:c, :output}, :o1)
+    |> link({:b, :output}, :o2)
+  end
+  #      ┌───▶[input (a) output]─────────────────────────▶[o1]
+  # [i1]─│
+  #      └───▶[input (b) output]───▶[input (c) output]───▶[o2]
+  def graph(:i1_single3_o2_inverse) do
+    graph(id: :graph,
+          pins: [
+            %Pin{id: :i1, type: :input, data_type: :i8},
+            %Pin{id: :o1, type: :output, data_type: :i8},
+            %Pin{id: :o2, type: :output, data_type: :i8}])
+    |> add(Node.new(:a, Single))
+    |> add(Node.new(:b, Single))
+    |> add(Node.new(:c, Single))
+    |> link(:i1, {:a, :input})
+    |> link(:i1, {:b, :input})
+    |> link({:b, :output}, {:c, :input})
+    |> link({:a, :output}, :o1)
+    |> link({:c, :output}, :o2)
+  end
   def graph(:longest_chain_test) do
     graph(id: :graph,
           pins: [

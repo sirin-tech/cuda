@@ -273,33 +273,24 @@ defmodule Cuda.Graph do
     |> Node.get_pins(:input)
     |> Enum.reduce([], fn %Pin{id: id}, acc ->
       case lc_link(graph, {:__self__, id}) do
-        {_, {:__self__, _}} ->
+        [] ->
           acc
-        {_, {node_id, _}} ->
-          node = node(graph, node_id)
-          chain = longest_chain(graph, node_type, node)
+        links ->
+          chain = links
+          |> Enum.reduce([], fn
+            ({_, {:__self__, _}}, acc) ->
+              acc
+            ({_, {node_id, _}}, acc)   ->
+              node = node(graph, node_id)
+              chain = longest_chain(graph, node_type, node)
+              lc_max_list(chain, acc)
+          end)
           lc_max_list(chain, acc)
       end
     end)
   end
 
   defp longest_chain(graph, type, node, current \\ [], max \\ []) do
-    #outnodes = lc_out_nodes(graph, node)
-    #{current, max} = if node.type == type do
-    #  {current ++ [node], max}
-    #else
-    #  {[], lc_max_list(current, max)}
-    #end
-    #if length(outnodes) > 0 do
-    #  outnodes
-    #  |> Enum.reduce([], fn n, acc ->
-    #    chain = longest_chain(graph, type, n, current, max)
-    #    lc_max_list(chain, acc)
-    #  end)
-    #else
-    #  lc_max_list(current, max)
-    #end
-
     {current, max} = case node.type do
       ^type -> {current ++ [node], max}
       _     -> {[], lc_max_list(current, max)}
@@ -316,7 +307,7 @@ defmodule Cuda.Graph do
   end
 
   defp lc_link(%{links: links}, link_part) do
-    Enum.find(links, fn
+    Enum.filter(links, fn
       {^link_part, _} -> true
       _               -> false
     end)
@@ -326,13 +317,30 @@ defmodule Cuda.Graph do
     length(list1) > length(list2) && list1 || list2
   end
 
-  defp lc_out_nodes(graph, node) do
+  def lc_out_nodes(graph, node) do
+    # node
+    # |> Node.get_pins(:output)
+    # |> Enum.reduce([], fn %Pin{id: id}, acc ->
+    #   case lc_link(graph, {node.id, id}) do
+    #     {_, {:__self__, _}} -> acc
+    #     {_, {node_id, _}}   -> [node(graph, node_id) | acc]
+    #   end
+    # end)
+    # |> Enum.uniq()
+
     node
     |> Node.get_pins(:output)
     |> Enum.reduce([], fn %Pin{id: id}, acc ->
       case lc_link(graph, {node.id, id}) do
-        {_, {:__self__, _}} -> acc
-        {_, {node_id, _}}   -> [node(graph, node_id) | acc]
+        []    ->
+          acc
+        links ->
+          nodes = links
+          |> Enum.reduce([], fn
+            ({_, {:__self__, _}}, acc) -> acc
+            ({_, {node_id, _}}, acc)   -> [node(graph, node_id) | acc]
+          end)
+          nodes ++ acc
       end
     end)
     |> Enum.uniq()
