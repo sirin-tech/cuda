@@ -192,4 +192,40 @@ defmodule GraphTest do
               {{:__self__, :i}, {{:x, :a}, :input}}] = graph.links
     end
   end
+
+  describe "longest_chain/2" do
+    test "finds the longest chain in graph" do
+
+      assert :longest_chain_test
+      |> graph()
+      |> Graph.longest_chain(:gpu)
+      |> length() == 3
+
+      # [i1]──▶⎡input1 (a) output1⎤──▶[o1]
+      # [i2]──▶⎣input2     output2⎦──▶[o2]
+      assert :i2_double1_o2
+      |> graph()
+      |> Graph.longest_chain(:gpu)
+      |> length() == 0
+
+      # [i]──▶[input (a) output]─┬──────────────────────▶[o1]
+      #                          └─▶[input (b) output]──▶[o2]
+      assert :i1_single1_single1_o2
+      |> graph()
+      |> Graph.longest_chain(:virtual)
+      |> length() == 2
+    end
+
+    test "detects loops" do
+      # [i]──▶⎡input1 (a) output1⎤──▶[o]
+      #    ┌─▶⎣input2     output2⎦─┐
+      #    └───────────────────────┘
+      assert_raise(CompileError, fn -> Graph.longest_chain(graph(:i1_double1_o1), :virtual) end)
+    end
+
+    test "raises on unconnected pins" do
+      # [i]──▶[input (a) output]─x─▶[o]
+      assert_raise(CompileError, fn -> Graph.longest_chain(graph(:unconnected), :virtual) end)
+    end
+  end
 end
