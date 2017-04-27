@@ -160,12 +160,16 @@ defmodule Cuda.Graph.Node do
 
   @doc false
   # Returns a list of pins of specified type
-  @spec get_pins(node :: t, type :: Pin.type) :: Pin.t | nil
-  def get_pins(%{pins: pins}, type) do
+  @spec get_pins(node :: t, type :: Pin.type | [Pin.type]) :: [Pin.t] | nil
+  def get_pins(%{pins: pins}, type) when is_atom(type) do
     pins |> Enum.filter(fn
       %Pin{type: ^type} -> true
       _                 -> false
     end)
+  end
+  def get_pins(_, []), do: []
+  def get_pins(node, [type | rest]) do
+    get_pins(node, type) ++ get_pins(node, rest)
   end
   def get_pins(_, _), do: nil
 

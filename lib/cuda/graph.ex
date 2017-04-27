@@ -74,6 +74,19 @@ defmodule Cuda.Graph do
     end
   end
 
+  @doc """
+  Move node from source graph into destination graph, when destination graph
+  is nested into source graph and moving node belongs to source graph
+  """
+  @spec move(source_graph :: t, destination_graph :: t, node_id :: term) :: t
+  def move(srcg, dstg, nid) do
+    case node(srcg, nid) do
+      nil  -> error("Node #{nid} do not belongs to #{srcg.id} graph")
+      node ->
+
+    end
+  end
+
   def link(%__MODULE__{links: links} = graph, {sn, sp} = src, {dn, dp} = dst) do
     # node to node connection
     with {:src, %{} = src_node} <- {:src, node(graph, sn)},
@@ -318,16 +331,6 @@ defmodule Cuda.Graph do
   end
 
   def lc_out_nodes(graph, node) do
-    # node
-    # |> Node.get_pins(:output)
-    # |> Enum.reduce([], fn %Pin{id: id}, acc ->
-    #   case lc_link(graph, {node.id, id}) do
-    #     {_, {:__self__, _}} -> acc
-    #     {_, {node_id, _}}   -> [node(graph, node_id) | acc]
-    #   end
-    # end)
-    # |> Enum.uniq()
-
     node
     |> Node.get_pins(:output)
     |> Enum.reduce([], fn %Pin{id: id}, acc ->
