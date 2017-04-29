@@ -4,7 +4,7 @@ defmodule Cuda.Graph.Node do
 
   You can use this module to define your own evaluation nodes. To do this you
   should implement callbacks that will be called with user options, specified
-  at node creation time and current Cuda environment. Here is simple example:
+  at node creation time and current Cuda environment. Here is a simple example:
 
   ```
   defmodule MyNode do
@@ -33,7 +33,7 @@ defmodule Cuda.Graph.Node do
   }
 
   @doc """
-  Retrieves a complete pin list for newly created node.
+  Provides a complete pin list for newly created node.
 
   You can use `pin/3`, `input/2`, `output/2`, `consumer/2` and `producer/2`
   helpers here.
@@ -41,7 +41,7 @@ defmodule Cuda.Graph.Node do
   @callback __pins__(opts :: keyword, env :: keyword) :: [Pin.t]
 
   @doc """
-  Retrieves a node type.
+  Provides a node type.
 
   Following types are supported:
 
@@ -50,7 +50,8 @@ defmodule Cuda.Graph.Node do
                  usefull for intermediate data retrieving and so on.
   * `:host`    - node makes host (CPU) computations but does not affects any GPU
                  workflow
-  * `:gpu`     - node affects GPU and optionally CPU workflows.
+  * `:gpu`     - node affects GPU and optionally CPU workflows
+  * `:graph`   - node with graph nested in it
   """
   @callback __type__(opts :: keyword, env :: keyword) :: type
 
@@ -120,7 +121,6 @@ defmodule Cuda.Graph.Node do
   @spec new(id :: Graph.id, module :: module, options :: keyword, env :: keyword) :: t
   def new(id, module, opts \\ [], env \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
-      # id = Keyword.get(opts, :name, Graph.gen_id())
       if id in @reserved_names do
         raise CompileError, description: "Reserved node name '#{id}' used"
       end
@@ -148,7 +148,7 @@ defmodule Cuda.Graph.Node do
   end
 
   @doc false
-  # Returns connector by its id
+  # Returns pin by its id
   @spec get_pin(node:: t, id: Graph.id) :: Pin.t | nil
   def get_pin(%{pins: pins}, id) do
     pins |> Enum.find(fn

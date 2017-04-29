@@ -1,6 +1,6 @@
 defmodule Cuda.Graph.Pin do
   @moduledoc """
-  Represents evaluation graph node connector.
+  Represents evaluation graph node connector (pin).
   """
 
   alias Cuda.Graph

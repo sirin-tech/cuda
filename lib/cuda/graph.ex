@@ -49,7 +49,9 @@ defmodule Cuda.Graph do
   @spec new(id :: id, module :: module, opts :: keyword, env :: keyword) :: t
   def new(id, module, opts \\ [], env \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
-      graph = Node.new(id, module, opts, env) |> Map.from_struct
+      graph = id
+              |> Node.new(module, opts, env)
+              |> Map.from_struct
       graph = struct(__MODULE__, graph)
       graph = case function_exported?(module, :__graph__, 3) do
         true -> module.__graph__(graph, opts, env)
@@ -79,11 +81,11 @@ defmodule Cuda.Graph do
   is nested into source graph and moving node belongs to source graph
   """
   @spec move(source_graph :: t, destination_graph :: t, node_id :: term) :: t
-  def move(srcg, dstg, nid) do
+  def move(srcg, _dstg, nid) do
     case node(srcg, nid) do
       nil  -> error("Node #{nid} do not belongs to #{srcg.id} graph")
-      node ->
-
+      _node ->
+        nil
     end
   end
 
@@ -161,41 +163,48 @@ defmodule Cuda.Graph do
       {:ok, st}
     end
     with {:ok, st} <- result do
-      result = node_spec |> dfs_next_spec(st.graph) |> Enum.reduce({:ok, st}, fn
-        next, {:ok, st} ->
-          next = Enum.filter(st.graph.links, fn
-            {^next, dst} -> dst
-            _ -> nil
-          end)
-          case next do
-            [] ->
-              error("unconnected pin detected")
-            next ->
-              next |> Enum.reduce({:ok, st}, fn
-                {_, dst_spec}, {:ok, st} ->
-                  case dst_spec in st.nodes do
-                    false ->
-                      dst = node_and_pin_by_spec(st.graph, dst_spec)
-                      with {:ok, st} <- yield(callback, :move, {node, dst}, st) do
-                        # st = %{st | nodes: [dst | st.nodes]}
-                        dfs(dst_spec, callback, {:ok, st})
-                      end
-                    _ ->
-                      {:ok, st}
-                      # {:error, :loop}
-                  end
-                _, result ->
-                  result
-              end)
-          end
-        _, result -> result
-      end)
+      result = node_spec
+               |> dfs_next_spec(st.graph)
+               |> Enum.reduce({:ok, st}, & dfs_reducer(&1, &2, node, callback))
       with {:ok, st} <- result do
         yield(callback, :leave, node, st)
       end
     end
   end
   def dfs(_, _, result), do: result
+
+  defp dfs_reducer(next, {:ok, st}, node, callback) do
+    next = Enum.filter(st.graph.links, fn
+      {^next, dst} -> dst
+      _            -> nil
+    end)
+    case next do
+      [] ->
+        error("unconnected pin detected")
+      next ->
+        next
+        |> Enum.reduce({:ok, st}, & dfs_next_reducer(&1, &2, node, callback))
+    end
+  end
+  defp dfs_reducer(_next, result, _node, _callback) do
+    result
+  end
+
+  defp dfs_next_reducer({_, dst_spec}, {:ok, st}, node, callback) do
+    case dst_spec in st.nodes do
+      false ->
+        dst = node_and_pin_by_spec(st.graph, dst_spec)
+        with {:ok, st} <- yield(callback, :move, {node, dst}, st) do
+          # recursion
+          dfs(dst_spec, callback, {:ok, st})
+        end
+      _ ->
+        {:ok, st}
+    end
+  end
+  defp dfs_next_reducer(_next, result, _node, _callback) do
+    result
+  end
 
   def topology_sort(graph) do
     with false <- loop?(graph) do
@@ -253,20 +262,7 @@ defmodule Cuda.Graph do
         g = g |> expand()
         nodes = g.nodes |> Enum.map(& expand_id(&1, gid))
         g_links = g.links |> Enum.map(& expand_link(&1, gid))
-        links = g_links |> Enum.reduce(links, fn
-          {{:__self__, spin}, {:__self__, dpin}}, links ->
-            {src, dst, links} = Enum.reduce(links, {nil, [], []}, fn
-              {{^gid, ^spin} = src, _}, {_, dst, links} -> {src, dst, links}
-              {_, {^gid, ^dpin} = d}, {src, dst, links} -> {src, [d | dst], links}
-              link, {src, dst, links} -> {src, dst, [link | links]}
-            end)
-            links ++ Enum.map(dst, & {src, &1})
-          {{:__self__, pin}, dst}, links ->
-            links |> replace_dst({gid, pin}, dst)
-          {src, {:__self__, pin}}, links ->
-            links |> replace_src({gid, pin}, src)
-          x, links -> [x | links]
-        end)
+        links = g_links |> Enum.reduce(links, & expand_link_reducer(&1, &2, gid))
         {nodes, links}
       node, links ->
         {[node], links}
@@ -274,6 +270,24 @@ defmodule Cuda.Graph do
     graph = %{graph | nodes: nodes, links: links}
     if loop?(graph), do: raise error("loop detected in expanded graph")
     graph
+  end
+
+  defp expand_link_reducer({{:__self__, spin}, {:__self__, dpin}}, links, gid) do
+    {src, dst, links} = Enum.reduce(links, {nil, [], []}, fn
+      {{^gid, ^spin} = src, _}, {_, dst, links} -> {src, dst, links}
+      {_, {^gid, ^dpin} = d}, {src, dst, links} -> {src, [d | dst], links}
+      link, {src, dst, links} -> {src, dst, [link | links]}
+    end)
+    links ++ Enum.map(dst, & {src, &1})
+  end
+  defp expand_link_reducer({{:__self__, pin}, dst}, links, gid) do
+    links |> replace_dst({gid, pin}, dst)
+  end
+  defp expand_link_reducer({src, {:__self__, pin}}, links, gid) do
+    links |> replace_src({gid, pin}, src)
+  end
+  defp expand_link_reducer(x, links, _) do
+    [x | links]
   end
 
   @doc """
