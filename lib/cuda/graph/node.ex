@@ -1,3 +1,7 @@
+alias Cuda.Graph
+alias Cuda.Graph.Pin
+alias Cuda.Graph.NodeProto
+
 defmodule Cuda.Graph.Node do
   @moduledoc """
   Represents an evaluation graph node.
@@ -21,8 +25,7 @@ defmodule Cuda.Graph.Node do
   ```
   """
 
-  alias Cuda.Graph
-  alias Cuda.Graph.Pin
+  require Cuda
 
   @type type :: :gpu | :host | :virtual | :graph
   @type t :: %__MODULE__{
@@ -59,6 +62,7 @@ defmodule Cuda.Graph.Node do
   @reserved_names ~w(input output)a
   @exports [consumer: 2, input: 2, output: 2, pin: 3, producer: 2]
 
+  @derive [NodeProto]
   defstruct [:id, :module, :type, pins: []]
 
   defmacro __using__(_opts) do
@@ -146,32 +150,6 @@ defmodule Cuda.Graph.Node do
       _ -> raise CompileError, description: "Node module #{module} could not be loaded"
     end
   end
-
-  @doc false
-  # Returns pin by its id
-  @spec get_pin(node:: t, id: Graph.id) :: Pin.t | nil
-  def get_pin(%{pins: pins}, id) do
-    pins |> Enum.find(fn
-      %Pin{id: ^id} -> true
-      _             -> false
-    end)
-  end
-  def get_pin(_, _), do: nil
-
-  @doc false
-  # Returns a list of pins of specified type
-  @spec get_pins(node :: t, type :: Pin.type | [Pin.type]) :: [Pin.t] | nil
-  def get_pins(%{pins: pins}, type) when is_atom(type) do
-    pins |> Enum.filter(fn
-      %Pin{type: ^type} -> true
-      _                 -> false
-    end)
-  end
-  def get_pins(_, []), do: []
-  def get_pins(node, [type | rest]) do
-    get_pins(node, type) ++ get_pins(node, rest)
-  end
-  def get_pins(_, _), do: nil
 
   defp valid_pin?(%Pin{}), do: true
   defp valid_pin?(_), do: false

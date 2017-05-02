@@ -85,7 +85,7 @@ defmodule Cuda.Test.GraphHelpers do
     graph(id: :g,
       pins: [%Pin{id: :i, type: :input, data_type: :i8},
              %Pin{id: :o, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
+    |> add(:a, Single)
     |> link(:i, {:a, :input})
   end
   # [i]──▶[input (a) output]──▶[o]
@@ -93,7 +93,7 @@ defmodule Cuda.Test.GraphHelpers do
     graph(id: :g,
           pins: [%Pin{id: :i, type: :input, data_type: :i8},
                  %Pin{id: :o, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
+    |> add(:a, Single)
     |> link(:i, {:a, :input})
     |> link({:a, :output}, :o)
   end
@@ -104,8 +104,8 @@ defmodule Cuda.Test.GraphHelpers do
           pins: [%Pin{id: :i, type: :input, data_type: :i8},
                  %Pin{id: :o1, type: :output, data_type: :i8},
                  %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
-    |> add(Node.new(:b, Single))
+    |> add(:a, Single)
+    |> add(:b, Single)
     |> link(:i, {:a, :input})
     |> link(:i, {:b, :input})
     |> link({:a, :output}, :o1)
@@ -119,7 +119,7 @@ defmodule Cuda.Test.GraphHelpers do
                  %Pin{id: :i2, type: :input, data_type: :i8},
                  %Pin{id: :o1, type: :output, data_type: :i8},
                  %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Double))
+    |> add(:a, Double)
     |> link(:i1, {:a, :input1})
     |> link(:i2, {:a, :input2})
     |> link({:a, :output1}, :o1)
@@ -132,7 +132,7 @@ defmodule Cuda.Test.GraphHelpers do
     graph(id: :g,
           pins: [%Pin{id: :i, type: :input, data_type: :i8},
                  %Pin{id: :o, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Double))
+    |> add(:a, Double)
     |> link(:i, {:a, :input1})
     |> link({:a, :output1}, :o)
     |> link({:a, :output2}, {:a, :input2})
@@ -144,8 +144,8 @@ defmodule Cuda.Test.GraphHelpers do
           pins: [%Pin{id: :i, type: :input, data_type: :i8},
                  %Pin{id: :o1, type: :output, data_type: :i8},
                  %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
-    |> add(Node.new(:b, Single))
+    |> add(:a, Single)
+    |> add(:b, Single)
     |> link(:i, {:a, :input})
     |> link({:a, :output}, :o1)
     |> link({:a, :output}, {:b, :input})
@@ -156,7 +156,7 @@ defmodule Cuda.Test.GraphHelpers do
     graph(id: :g,
           pins: [%Pin{id: :i, type: :input, data_type: :i8},
                  %Pin{id: :o, type: :output, data_type: :i8}])
-    |> add(Graph.new(:x, SimpleGraph))
+    |> Cuda.Graph.GraphProto.add(Graph.new(:x, SimpleGraph))
     |> link(:i, {:x, :input})
     |> link({:x, :output}, :o)
   end
@@ -168,10 +168,10 @@ defmodule Cuda.Test.GraphHelpers do
             %Pin{id: :i1, type: :input, data_type: :i8},
             %Pin{id: :o1, type: :output, data_type: :i8},
             %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
-    |> add(Node.new(:b, Single))
-    |> add(Node.new(:c, Single))
-    |> add(Node.new(:d, Single))
+    |> add(:a, Single)
+    |> add(:b, Single)
+    |> add(:c, Single)
+    |> add(:d, Single)
     |> link(:i1, {:a, :input})
     |> link({:a, :output}, {:b, :input})
     |> link({:a, :output}, {:c, :input})
@@ -187,10 +187,10 @@ defmodule Cuda.Test.GraphHelpers do
             %Pin{id: :i1, type: :input, data_type: :i8},
             %Pin{id: :o1, type: :output, data_type: :i8},
             %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
-    |> add(Node.new(:b, Single))
-    |> add(Node.new(:c, Single))
-    |> add(Node.new(:d, Single))
+    |> add(:a, Single)
+    |> add(:b, Single)
+    |> add(:c, Single)
+    |> add(:d, Single)
     |> link(:i1, {:a, :input})
     |> link({:a, :output}, {:b, :input})
     |> link({:a, :output}, {:c, :input})
@@ -207,9 +207,9 @@ defmodule Cuda.Test.GraphHelpers do
             %Pin{id: :i1, type: :input, data_type: :i8},
             %Pin{id: :o1, type: :output, data_type: :i8},
             %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
-    |> add(Node.new(:b, Single))
-    |> add(Node.new(:c, Single))
+    |> add(:a, Single)
+    |> add(:b, Single)
+    |> add(:c, Single)
     |> link(:i1, {:a, :input})
     |> link(:i1, {:b, :input})
     |> link({:a, :output}, {:c, :input})
@@ -225,9 +225,9 @@ defmodule Cuda.Test.GraphHelpers do
             %Pin{id: :i1, type: :input, data_type: :i8},
             %Pin{id: :o1, type: :output, data_type: :i8},
             %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Single))
-    |> add(Node.new(:b, Single))
-    |> add(Node.new(:c, Single))
+    |> add(:a, Single)
+    |> add(:b, Single)
+    |> add(:c, Single)
     |> link(:i1, {:a, :input})
     |> link(:i1, {:b, :input})
     |> link({:b, :output}, {:c, :input})
@@ -241,21 +241,21 @@ defmodule Cuda.Test.GraphHelpers do
             %Pin{id: :i2, type: :input, data_type: :i8},
             %Pin{id: :o1, type: :output, data_type: :i8},
             %Pin{id: :o2, type: :output, data_type: :i8}])
-    |> add(Node.new(:a, Custom, type: :virtual, io: {1, 2}))
-    |> add(Node.new(:b, Single, type: :virtual))
-    |> add(Node.new(:c, Custom, type: :virtual, io: {1, 3}))
-    |> add(Node.new(:d, Double, type: :gpu))
-    |> add(Node.new(:e, Single, type: :virtual))
-    |> add(Node.new(:f, Single, type: :gpu))
-    |> add(Node.new(:g, Single, type: :virtual))
-    |> add(Node.new(:h, Single, type: :gpu))
-    |> add(Node.new(:i, Single, type: :virtual))
-    |> add(Node.new(:j, Custom, type: :gpu, io: {2, 1}))
-    |> add(Node.new(:k, Custom, type: :gpu, io: {2, 1}))
-    |> add(Node.new(:l, Single, type: :gpu))
-    |> add(Node.new(:m, Single, type: :virtual))
-    |> add(Node.new(:n, Custom, type: :virtual, io: {2, 1}))
-    |> add(Node.new(:o, Single, type: :gpu))
+    |> add(:a, Custom, type: :virtual, io: {1, 2})
+    |> add(:b, Single, type: :virtual)
+    |> add(:c, Custom, type: :virtual, io: {1, 3})
+    |> add(:d, Double, type: :gpu)
+    |> add(:e, Single, type: :virtual)
+    |> add(:f, Single, type: :gpu)
+    |> add(:g, Single, type: :virtual)
+    |> add(:h, Single, type: :gpu)
+    |> add(:i, Single, type: :virtual)
+    |> add(:j, Custom, type: :gpu, io: {2, 1})
+    |> add(:k, Custom, type: :gpu, io: {2, 1})
+    |> add(:l, Single, type: :gpu)
+    |> add(:m, Single, type: :virtual)
+    |> add(:n, Custom, type: :virtual, io: {2, 1})
+    |> add(:o, Single, type: :gpu)
     |> link(:i1, {:a, :input1})
     |> link(:i2, {:b, :input})
     |> link({:a, :output1}, {:c, :input1})

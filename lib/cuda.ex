@@ -14,6 +14,12 @@ defmodule Cuda do
     GenServer.start_link(__MODULE__, opts, [])
   end
 
+  defmacro compile_error(msg) do
+    quote do
+      raise CompileError, description: unquote(msg)
+    end
+  end
+
   @doc """
   Returns NVIDIA driver and CUDA library info
 
