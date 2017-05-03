@@ -39,6 +39,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   @input_pins  ~w(input consumer)a
   @output_pins ~w(output producer)a
+  @any_pins ~w(input consumer output producer)a
 
   # ----------------------------------------------------------------------------
   # dfs
@@ -285,7 +286,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # longest_chain
   # ----------------------------------------------------------------------------
   def longest_chain(graph, node_type) do
-    graph
+    lchain = graph
     |> expand
     |> NodeProto.pins(@input_pins)
     |> lc_producer_pins(graph)
@@ -306,16 +307,27 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
           lc_max_list(chain, acc)
       end
     end)
+    if length(lchain) == 0 do
+      []
+    else
+      graph = lc_graph_update(graph, lchain)
+      [lchain | longest_chain(graph, node_type)]
+    end
   end
 
   defp longest_chain(graph, type, node, current \\ [], max \\ []) do
-    {current, max} = case node.type do
-      ^type -> {current ++ [node], max}
-      _     -> {[], lc_max_list(current, max)}
+    {current, max} = cond do
+      !lc_check_inputs?(List.last(current), node, graph) ->
+        {[], lc_max_list(current, max)}
+      node.type == type ->
+        {current ++ [node], max}
+      true ->
+        {[], lc_max_list(current, max)}
     end
     case lc_out_nodes(graph, node) do
       [] ->
         lc_max_list(current, max)
+        #[current | max]
       outnodes ->
         Enum.reduce(outnodes, [], fn n, acc ->
           chain = longest_chain(graph, type, n, current, max)
@@ -356,20 +368,44 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp lc_producer_pins(pin_list, %{nodes: nodes}) do
     Enum.reduce(nodes, pin_list, fn node, acc ->
-      NodeProto.pins(:producer) ++ acc
+      NodeProto.pins(node, :producer) ++ acc
     end)
+  end
+
+  defp lc_check_inputs?(nil, _, _), do: true
+  defp lc_check_inputs?(%{id: pid}, %{id: cid} = cnode, %{links: links}) do
+    inpins = cnode
+    |> NodeProto.pins(@input_pins)
+    |> length()
+    links
+    |> Enum.filter(fn
+      {{^pid, _}, {^cid, _}} -> true
+      _                      -> false
+    end)
+    |> length() == inpins
+  end
+
+  defp lc_graph_update(graph, []), do: graph |> IO.inspect
+  defp lc_graph_update(graph, [node | rest]) do
+    index = Enum.find_index(graph.nodes, &(&1.id == node.id))
+    nodes = List.update_at(graph.nodes, index, &(%{&1 | type: "longest_chain_stub"}))
+    graph = %{graph | nodes: nodes}
+    lc_graph_update(graph, rest)
   end
 
   #-----------------------------------------------------------------------------
   # move
   #-----------------------------------------------------------------------------
-  def move(srcg, _dstg, nid) do
-    case GraphProto.node(srcg, nid) do
-      nil   -> compile_error("Node #{nid} do not belongs to #{srcg.id} graph")
-      node  ->
-        pinp = NodeProto.pins(node, @input_pins)
-        pout = NodeProto.pins(node, @output_pins)
-    end
+  def move(srcg, %{nodes: []} = dstg, nid) do
+    #case GraphProto.node(srcg, nid) do
+    #  nil   -> compile_error("Node #{nid} do not belongs to #{srcg.id} graph")
+    #  node  ->
+    #    {dictpins, pins} = node
+    #    |> NodeProto.pins(@all_pins)
+    #    |> Enum.reduce({srcg.links, []}, fn %{id: pid}, )
+
+
+    #end
   end
 
   defp mv_create_graph(node) do

@@ -13,7 +13,7 @@ defprotocol Cuda.Graph.NodeProto do
   Returns a list of pins of specified type
   """
   @spec pins(node :: Node.t, type :: Pin.type | [Pin.type]) :: [Pin.t]
-  def pins(node, type)
+  def pins(node, type \\ nil)
 end
 
 defprotocol Cuda.Graph.GraphProto do
@@ -44,17 +44,16 @@ defimpl Cuda.Graph.NodeProto, for: Any do
   end
   def get_pin(_, _), do: nil
 
-  def pins(%{pins: pins}, type) when is_atom(type) do
+  def pins(%{pins: pins}, nil), do: pins
+  def pins(node, types) when is_list(types) do
+    Enum.reduce(types, [], &(&2 ++ pins(node, &1)))
+  end
+  def pins(%{pins: pins}, type) do
     pins |> Enum.filter(fn
       %Pin{type: ^type} -> true
       _                 -> false
     end)
   end
-  def pins(_, []), do: []
-  def pins(node, [type | rest]) do
-    pins(node, type) ++ pins(node, rest)
-  end
-  def pins(_, _), do: []
 end
 
 defimpl Cuda.Graph.GraphProto, for: Any do
