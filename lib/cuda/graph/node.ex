@@ -1,7 +1,3 @@
-alias Cuda.Graph
-alias Cuda.Graph.Pin
-alias Cuda.Graph.NodeProto
-
 defmodule Cuda.Graph.Node do
   @moduledoc """
   Represents an evaluation graph node.
@@ -26,6 +22,9 @@ defmodule Cuda.Graph.Node do
   """
 
   require Cuda
+  alias Cuda.Graph
+  alias Cuda.Graph.Pin
+  alias Cuda.Graph.NodeProto
 
   @type type :: :gpu | :host | :virtual | :graph
   @type t :: %__MODULE__{
@@ -34,6 +33,16 @@ defmodule Cuda.Graph.Node do
     type: type,
     pins: [Pin.t]
   }
+
+  @doc """
+  Provides a node protocol that is a structurethat holds node data.
+
+  It can be for example `Cuda.Graph`, `Cuda.Graph.Node`, `Cuda.Graph.GPUNode`
+  or any other module that implements node protocol functionality.
+
+  By default it will be `Cuda.Graph.Node`.
+  """
+  @callback __proto__(opts :: keyword, env :: keyword) :: atom
 
   @doc """
   Provides a complete pin list for newly created node.
@@ -58,8 +67,6 @@ defmodule Cuda.Graph.Node do
   """
   @callback __type__(opts :: keyword, env :: keyword) :: type
 
-  @types ~w(gpu host virtual graph)a
-  @reserved_names ~w(input output)a
   @exports [consumer: 2, input: 2, output: 2, pin: 3, producer: 2]
 
   @derive [NodeProto]
@@ -69,6 +76,8 @@ defmodule Cuda.Graph.Node do
     quote do
       import unquote(__MODULE__), only: unquote(@exports)
       @behaviour unquote(__MODULE__)
+      def __proto__(_opts, _env), do: unquote(__MODULE__)
+      defoverridable __proto__: 2
     end
   end
 
@@ -120,13 +129,31 @@ defmodule Cuda.Graph.Node do
   def consumer(name, data_type), do: pin(name, :consumer, data_type)
 
   @doc """
-  Creates a new evaluation node
+  Returns module of struct that used to store node data. It can be for example
+  `Cuda.Graph`, `Cuda.Graph.Node`, `Cuda.Graph.GPUNode` or any other module,
+  related to node type.
   """
-  @spec new(id :: Graph.id, module :: module, options :: keyword, env :: keyword) :: t
-  def new(id, module, opts \\ [], env \\ []) do
+  @spec proto(module :: atom, opts :: keyword, env :: Cuda.Env.t) :: atom
+  def proto(module, opts, env) do
+    if function_exported?(module, :__proto__, 2) do
+      module.__proto__(opts, env)
+    else
+      __MODULE__
+    end
+  end
+end
+
+defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
+  require Cuda
+  alias Cuda.Graph.Pin
+
+  @types ~w(gpu host virtual graph)a
+  @reserved_names ~w(input output)a
+
+  def new(_, id, module, opts \\ [], env \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
       if id in @reserved_names do
-        raise CompileError, description: "Reserved node name '#{id}' used"
+        Cuda.compile_error("Reserved node name '#{id}' used")
       end
 
       type = case function_exported?(module, :__type__, 2) do
@@ -134,7 +161,7 @@ defmodule Cuda.Graph.Node do
         _    -> :virtual
       end
       if not type in @types do
-        raise CompileError, description: "Unsupported type: #{inspect type}"
+        Cuda.compile_error("Unsupported type: #{inspect type}")
       end
 
       pins = case function_exported?(module, :__pins__, 2) do
@@ -142,12 +169,12 @@ defmodule Cuda.Graph.Node do
         _    -> []
       end
       if not is_list(pins) or not Enum.all?(pins, &valid_pin?/1) do
-        raise CompileError, description: "Invalid connector list supploed"
+        Cuda.compile_error("Invalid connector list supploed")
       end
 
-      struct(__MODULE__, id: id, module: module, type: type, pins: pins)
+      struct(Cuda.Graph.Node, id: id, module: module, type: type, pins: pins)
     else
-      _ -> raise CompileError, description: "Node module #{module} could not be loaded"
+      _ -> Cuda.compile_error("Node module #{module} could not be loaded")
     end
   end
 

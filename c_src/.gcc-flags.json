@@ -1,0 +1,8 @@
+{
+  "execPath": "/usr/bin/g++",
+  "gccDefaultCFlags": "-Wall -fsyntax-only",
+  "gccDefaultCppFlags": "-Wall -std=c++11 -fsyntax-only",
+  "gccErrorLimit": 15,
+  "gccIncludePaths": "/usr/local/cuda-8.0/include",
+  "gccSuppressWarnings": false
+}

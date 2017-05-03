@@ -1,9 +1,7 @@
-alias Cuda.Graph
-alias Cuda.Graph.Pin
-alias Cuda.Graph.NodeProto
-alias Cuda.Graph.GraphProto
+defprotocol Cuda.Graph.Processing do
+  alias Cuda.Graph
+  alias Cuda.Graph.Pin
 
-defprotocol Graph.Processing do
   @spec dfs(graph :: Graph.t, callback :: Graph.dfs_callback, state :: any) :: Graph.dfs_result
   def dfs(graph, callback, state)
 
@@ -30,7 +28,12 @@ defprotocol Graph.Processing do
   def move(srcg, _dstg, nid)
 end
 
-defimpl Graph.Processing, for: Graph do
+defimpl Cuda.Graph.Processing, for: Cuda.Graph do
+  alias Cuda.Graph
+  alias Cuda.Graph.Pin
+  alias Cuda.Graph.NodeProto
+  alias Cuda.Graph.GraphProto
+
   require Cuda
   import Cuda, only: [compile_error: 1]
 

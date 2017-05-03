@@ -3,7 +3,6 @@ defmodule GraphTest do
   alias Cuda.Graph
   alias Cuda.Graph.Node
   alias Cuda.Graph.Pin
-  alias Cuda.Graph.GraphProto
 
   import Cuda.Test.GraphHelpers
   import Graph, except: [graph: 1, graph: 2]
@@ -13,12 +12,12 @@ defmodule GraphTest do
 
   describe "add/4" do
     test "adds nodes to graph" do
-      graph = graph() |> GraphProto.add(Node.new(:a, Single))
+      graph = graph() |> add(:a, Single)
       assert [%Node{id: :a}] = graph.nodes
     end
 
     test "rejects nodes with id that already in the graph" do
-      graph = graph() |> GraphProto.add(Node.new(:a, Single))
+      graph = graph() |> add(:a, Single)
       assert_raise(CompileError, fn -> graph |> add(:a, Double) end)
     end
   end
@@ -26,14 +25,14 @@ defmodule GraphTest do
   describe "link/2" do
     test "links graph input to node input" do
       graph = graph(pins: [%Pin{id: :i, type: :input, data_type: :i8}])
-              |> GraphProto.add(Node.new(:a, Single))
+              |> add(:a, Single)
               |> link(:i, {:a, :input})
       assert [{{:__self__, :i}, {:a, :input}}] = graph.links
     end
 
     test "links node output to graph output" do
       graph = graph(pins: [%Pin{id: :o, type: :output, data_type: :i8}])
-              |> GraphProto.add(Node.new(:a, Single))
+              |> add(:a, Single)
               |> link({:a, :output}, :o)
       assert [{{:a, :output}, {:__self__, :o}}] = graph.links
     end
@@ -47,8 +46,8 @@ defmodule GraphTest do
 
     test "links node output to node input" do
       graph = graph()
-              |> GraphProto.add(Node.new(:a, Single))
-              |> GraphProto.add(Node.new(:b, Single))
+              |> add(:a, Single)
+              |> add(:b, Single)
               |> link({:a, :output}, {:b, :input})
       assert [{{:a, :output}, {:b, :input}}] = graph.links
     end

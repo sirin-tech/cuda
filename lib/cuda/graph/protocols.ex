@@ -2,7 +2,7 @@ alias Cuda.Graph
 alias Cuda.Graph.Node
 alias Cuda.Graph.Pin
 
-defprotocol Graph.NodeProto do
+defprotocol Cuda.Graph.NodeProto do
   @doc """
   Returns pin by its id
   """
@@ -16,7 +16,7 @@ defprotocol Graph.NodeProto do
   def pins(node, type)
 end
 
-defprotocol Graph.GraphProto do
+defprotocol Cuda.Graph.GraphProto do
   @spec add(graph :: Graph.t, node :: Node.t) :: Graph.t
   def add(graph, node)
 
@@ -27,7 +27,15 @@ defprotocol Graph.GraphProto do
   def node(graph, id)
 end
 
-defimpl Graph.NodeProto, for: Any do
+defprotocol Cuda.Graph.Factory do
+  @doc """
+  Creates a new evaluation node
+  """
+  @spec new(node :: struct, id :: Graph.id, module :: atom, opts :: keyword, env :: Cuda.Env.t) :: struct
+  def new(node, id, module, opts, env)
+end
+
+defimpl Cuda.Graph.NodeProto, for: Any do
   def pin(%{pins: pins}, id) do
     pins |> Enum.find(fn
       %Pin{id: ^id} -> true
@@ -49,7 +57,7 @@ defimpl Graph.NodeProto, for: Any do
   def pins(_, _), do: []
 end
 
-defimpl Graph.GraphProto, for: Any do
+defimpl Cuda.Graph.GraphProto, for: Any do
   require Cuda
   import Cuda, only: [compile_error: 1]
 

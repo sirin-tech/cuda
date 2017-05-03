@@ -7,7 +7,7 @@ defmodule Cuda.Mixfile do
      elixir: "~> 1.4",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
-     compilers: [:port, :elixir, :app],
+     compilers: [:port, :elixir, :app, :cpp_ports],
      elixirc_paths: paths(),
      deps: deps(),
      aliases: aliases(),
@@ -21,6 +21,7 @@ defmodule Cuda.Mixfile do
 
   defp deps do
     [{:uuid, "~> 1.1"},
+     {:cpp_port, path: "../cpp_port"},
      {:credo, "~> 0.7", only: [:dev, :test]},
      {:ex_doc, "~> 0.15", only: :dev, runtime: false}]
   end
@@ -38,6 +39,13 @@ defmodule Cuda.Mixfile do
   defp paths do
     ["lib", Path.join(~w(test support))]
   end
+
+  # defp cpp_ports do
+  #   [[module: A,
+  #     src: "src",
+  #     target: "priv/cuda_driver_port_test",
+  #     env: %{"CUDA" => "cuda-8.0"}]]
+  # end
 end
 
 defmodule Mix.Tasks.Compile.Port do
