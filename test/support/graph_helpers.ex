@@ -156,7 +156,7 @@ defmodule Cuda.Test.GraphHelpers do
     graph(id: :g,
           pins: [%Pin{id: :i, type: :input, data_type: :i8},
                  %Pin{id: :o, type: :output, data_type: :i8}])
-    |> Cuda.Graph.GraphProto.add(Graph.new(:x, SimpleGraph))
+    |> add(:x, SimpleGraph)
     |> link(:i, {:x, :input})
     |> link({:x, :output}, :o)
   end

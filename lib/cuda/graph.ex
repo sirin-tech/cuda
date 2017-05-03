@@ -1,6 +1,3 @@
-alias Cuda.Graph.GraphProto
-alias Cuda.Graph.NodeProto
-
 defmodule Cuda.Graph do
   @moduledoc """
   Represents evaluation graph
@@ -10,6 +7,8 @@ defmodule Cuda.Graph do
 
   alias Cuda.Graph.Pin
   alias Cuda.Graph.Node
+  alias Cuda.Graph.GraphProto
+  alias Cuda.Graph.NodeProto
 
   @type id :: String.t | atom | non_neg_integer
   @type link :: {id, id}
@@ -44,32 +43,17 @@ defmodule Cuda.Graph do
       import unquote(__MODULE__), only: unquote(@exports)
       @behaviour unquote(__MODULE__)
       def __type__(_, _), do: :graph
-    end
-  end
-
-  @doc """
-  Creates new graph node
-  """
-  @spec new(id :: id, module :: module, opts :: keyword, env :: keyword) :: t
-  def new(id, module, opts \\ [], env \\ []) do
-    with {:module, module} <- Code.ensure_loaded(module) do
-      graph = id
-              |> Node.new(module, opts, env)
-              |> Map.from_struct
-      graph = struct(__MODULE__, graph)
-      graph = case function_exported?(module, :__graph__, 3) do
-        true -> module.__graph__(graph, opts, env)
-        _    -> graph
-      end
-      # graph = graph |> Graph.expand()
-      graph
-    else
-      _ -> compile_error("Graph module #{module} could not be loaded")
+      def __proto__(_, _), do: unquote(__MODULE__)
     end
   end
 
   def add(%__MODULE__{} = graph, id, module, opts \\ [], env \\ []) do
-    GraphProto.add(graph, Node.new(id, module, opts, env))
+    with {:module, module} <- Code.ensure_loaded(module) do
+      proto = struct(Node.proto(module, opts, env))
+      GraphProto.add(graph, Cuda.Graph.Factory.new(proto, id, module, opts, env))
+    else
+      _ -> compile_error("Graph module #{module} could not be loaded")
+    end
   end
 
   @doc """
@@ -147,5 +131,27 @@ defmodule Cuda.Graph do
     if t1 != t2 do
       compile_error("The pins #{p1.id} and #{p2.id} has different types")
     end
+  end
+end
+
+defimpl Cuda.Graph.Factory, for: Cuda.Graph do
+  require Cuda
+  alias Cuda.Graph.Node
+
+  @doc """
+  Creates new graph node
+  """
+  def new(_, id, module, opts \\ [], env \\ []) do
+    proto = Node.proto(module, opts, env)
+    graph = %Node{}
+            |> Cuda.Graph.Factory.new(id, module, opts, env)
+            |> Map.from_struct
+    graph = struct(proto, graph)
+    graph = case function_exported?(module, :__graph__, 3) do
+      true -> module.__graph__(graph, opts, env)
+      _    -> graph
+    end
+    # graph = graph |> Graph.expand()
+    graph
   end
 end

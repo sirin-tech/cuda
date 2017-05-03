@@ -1,11 +1,15 @@
 MIX = mix
-SOURCES = $(wildcard c_src/*.cpp)
 
+SOURCES ?=
+LIBS ?=
+CXXFLAGS ?=
 GPU_DEBUG ?= "0"
 
+SOURCES += $(wildcard c_src/*.cpp)
+
 # common c++ compiler flags
-CXXFLAGS ?= -g -O3 -ansi -std=c++11 -pedantic -Wall -Wextra -Wno-long-long -DGPU_DEBUG=$(GPU_DEBUG)
-LIBS =
+CXXFLAGS += -g -O3 -ansi -std=c++11 -pedantic -Wall -Wextra -Wno-long-long -DGPU_DEBUG=$(GPU_DEBUG)
+# LIBS =
 
 # os specific flags
 ifneq ($(OS), Windows_NT)
@@ -42,6 +46,9 @@ priv/cuda_driver_port: priv $(SOURCES)
 
 priv/cuda_driver_port.exe: priv $(SOURCES)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LIBS)
+
+priv/cuda_driver_port_test: priv #$(SOURCES)
+	@echo $(SOURCES)
 
 clean:
 	$(RM) -f priv/cuda_driver_port
