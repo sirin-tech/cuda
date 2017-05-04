@@ -44,6 +44,7 @@ defmodule Cuda.Graph do
       @behaviour unquote(__MODULE__)
       def __type__(_, _), do: :graph
       def __proto__(_, _), do: unquote(__MODULE__)
+      defoverridable __type__: 2
     end
   end
 
