@@ -289,7 +289,6 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> expand
     |> NodeProto.pins(@input_pins)
     |> lc_producer_pins(graph)
-    #%Pin{id: id}
     |> Enum.reduce([], fn link_part, acc ->
       case lc_link(graph, link_part) do
         [] ->
@@ -327,7 +326,6 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     case lc_out_nodes(graph, node) do
       [] ->
         lc_max_list(current, max)
-        #[current | max]
       outnodes ->
         Enum.reduce(outnodes, [], fn n, acc ->
           chain = longest_chain(graph, type, n, current, max)
@@ -400,58 +398,63 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   #-----------------------------------------------------------------------------
   # move
   #-----------------------------------------------------------------------------
-  def move(srcg, %{nodes: []} = dstg, nid) do
-    #case GraphProto.node(srcg, nid) do
-    #  nil   -> compile_error("Node #{nid} do not belongs to #{srcg.id} graph")
-    #  node  ->
-    #    {dictpins, pins} = node
-    #    |> NodeProto.pins(@all_pins)
-    #    |> Enum.reduce({srcg.links, []}, fn %{id: pid}, )
-
-
-    #end
-  end
-
-  defp mv_create_graph(node) do
-    # pinp = node
-    # |> NodeProto.pins(@input_pins)
-    # |> Enum.reduce(%{}, fn pin ->
-    #
-    # end)
-  end
-
-  defp mv_copy_pins(srcgraph, %Graph.Node{pins: npins} = node, %Graph{id: g_id, pins: gpins} = dstgraph) do
-    npins
-    |> Enum.reduce({%{}, dstgraph}, fn pin, {names, graph} ->
-      nbrs = mv_neighbours(pin, node, srcgraph)
-      if List.keymember?(nbrs, g_id, 0) and length(nbrs) == 1 do
-        {names, graph}
-      else
-        id = pin.id
-        pin = %{pin | id: UUID.uuid1()}
-        graph = %{graph | pins: [pin | graph.pins]}
-        {Map.put(names, id, pin.id), graph}
-      end
+  def move(srcg, %{id: dstg_id, nodes: []} = dstg, %{id: nid} = node) do
+    {dictpins, dstg} = mv_copy_pins(dstg, node.pins)
+    srcg = mv_links_redirect(srcg, dstg_id, nid, dictpins)
+    srcg = %{srcg | nodes: List.delete(srcg.nodes, node)}
+    dstg = mv_add_node(dstg, node, dictpins)
+    nodes = Enum.map(srcg.nodes, fn
+      %{id: ^dstg_id} -> dstg
+      node            -> node
     end)
+    %{srcg | nodes: nodes}
+  end
+  def move(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
+  end
+  def move(srcg, dstg_id, node_id) do
+    dstg = mv_get_node(srcg, dstg_id)
+    node = mv_get_node(srcg, node_id)
+    move(srcg, dstg, node)
   end
 
-  defp mv_neighbours(pin, node, graph) do
-    link_part = {node.id, pin.id}
-    Enum.reduce(graph.links, [], fn
-      {^link_part, {n_id, p_id}}, acc ->
-        case List.keyfind(acc, n_id, 0) do
-          nil ->
-            [{n_id, [p_id]} | acc]
-          {id, pins} ->
-            List.keyreplace(acc, n_id, 0, {n_id, [p_id | pins]})
-        end
-      {{n_id, p_id},^link_part}, acc ->
-        case List.keyfind(acc, n_id, 0) do
-          nil ->
-            [{n_id, [p_id]} | acc]
-          {id, pins} ->
-            List.keyreplace(acc, n_id, 0, {n_id, [p_id | pins]})
-        end
+  defp mv_get_node(graph, node_id) do
+    case GraphProto.node(graph, node_id) do
+      nil   -> compile_error("Node #{node_id} not found in graph #{graph.id}")
+      node  -> node
+    end
+  end
+
+  defp mv_add_node(graph, %{id: nid} = node, dict) do
+    graph = %{graph | nodes: [node | graph.nodes]}
+    links = Map.to_list(dict)
+    |> Enum.reduce(graph.links, fn {npid, gpid}, links ->
+      %{type: type} = NodeProto.pin(node, npid)
+      newlink = cond do
+        Enum.member?(@input_pins, type)  -> {{:__self__, gpid}, {nid, npid}}
+        Enum.member?(@output_pins, type) -> {{nid, npid}, {:__self__, gpid}}
+      end
+      [newlink | links]
+    end)
+    %{graph | links: links}
+  end
+
+  defp mv_links_redirect(srcg, dstg_id, node_id, dict) do
+    links = Enum.map(srcg.links, fn
+      {{^node_id, pid}, other} -> {{dstg_id, dict[pid]}, other}
+      {other, {^node_id, pid}} -> {other, {dstg_id, dict[pid]}}
+      link                     -> link
+    end)
+    %{srcg | links: links}
+  end
+
+  defp mv_copy_pins(graph, pins) do
+    pins
+    |> Enum.reduce({%{}, graph}, fn pin, {dict, graph} ->
+      id = pin.id
+      pin = %{pin | id: UUID.uuid1()}
+      graph = %{graph | pins: [pin | graph.pins]}
+      dict = Map.put(dict, id, pin.id)
+      {dict, graph}
     end)
   end
 end

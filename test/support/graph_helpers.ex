@@ -323,4 +323,15 @@ defmodule Cuda.Test.GraphHelpers do
   def nodes2ids([val | rest]) do
     [val.id | nodes2ids(rest)]
   end
+
+  # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+  #                            └─▶[input (c) output]───────────────────────▶[o2]
+  def tst_mv_graph() do
+    # b
+    Code.ensure_loaded(Graph.ComputationGraph)
+    nested = Graph.Factory.new(%Cuda.Graph{}, :cmpgraph, Graph.ComputationGraph, [], [])
+    :i1_single4_o2
+    |> graph()
+    |> Graph.GraphProto.add(nested)
+  end
 end
