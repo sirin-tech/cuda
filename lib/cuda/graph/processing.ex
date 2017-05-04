@@ -410,6 +410,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     %{srcg | nodes: nodes}
   end
   def move(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
+    shrdlinks = mv_shared_links(srcg.links, nid, dstg_id)
   end
   def move(srcg, dstg_id, node_id) do
     dstg = mv_get_node(srcg, dstg_id)
@@ -445,6 +446,24 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       link                     -> link
     end)
     %{srcg | links: links}
+  end
+
+  defp mv_shared_links(links, nid1, nid2) do
+    links
+    |> Enum.filter(fn
+      {{^nid1, _}, {^nid2, _}} -> true
+      {{^nid2, _}, {^nid1, _}} -> true
+      _                        -> false
+    end)
+  end
+
+  defp mv_shared_pins(links, trgtid, nghbrid) do
+    links
+    |> Enum.reduce([], fn
+      {{^trgtid, pid}, {^nghbrid, _}}, acc -> [pid | acc]
+      {{^nghbrid, _}, {^trgtid, pid}}, acc -> [pid | acc]
+      _, acc                               -> acc
+    end)
   end
 
   defp mv_copy_pins(graph, pins) do
