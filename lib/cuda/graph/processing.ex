@@ -19,6 +19,13 @@ defprotocol Cuda.Graph.Processing do
   """
   @spec longest_chain(graph :: Graph.t, node_type :: Node.type) :: [any] # [node]
   def longest_chain(graph, node_type)
+
+  @doc """
+  Move node from source graph into destination graph, when destination graph
+  is nested into source graph and moving node belongs to source graph
+  """
+  @spec move(source_graph :: t, destination_graph :: t, node_id :: term) :: t
+  def move(srcg, _dstg, nid)
 end
 
 defimpl Cuda.Graph.Processing, for: Cuda.Graph do
@@ -32,6 +39,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   @input_pins  ~w(input consumer)a
   @output_pins ~w(output producer)a
+  @any_pins ~w(input consumer output producer)a
 
   # ----------------------------------------------------------------------------
   # dfs
@@ -259,29 +267,6 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     end)
   end
 
-  def longest_chain(graph, node_type) do
-    graph
-    |> expand
-    |> NodeProto.pins(:input)
-    |> Enum.reduce([], fn %Pin{id: id}, acc ->
-      case lc_link(graph, {:__self__, id}) do
-        [] ->
-          acc
-        links ->
-          chain = links
-          |> Enum.reduce([], fn
-            ({_, {:__self__, _}}, acc) ->
-              acc
-            ({_, {node_id, _}}, acc)   ->
-              node = GraphProto.node(graph, node_id)
-              chain = longest_chain(graph, node_type, node)
-              lc_max_list(chain, acc)
-          end)
-          lc_max_list(chain, acc)
-      end
-    end)
-  end
-
   # ----------------------------------------------------------------------------
   # topology_sort
   # ----------------------------------------------------------------------------
@@ -300,14 +285,49 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # ----------------------------------------------------------------------------
   # longest_chain
   # ----------------------------------------------------------------------------
+  def longest_chain(graph, node_type) do
+    lchain = graph
+    |> expand
+    |> NodeProto.pins(@input_pins)
+    |> lc_producer_pins(graph)
+    |> Enum.reduce([], fn %Pin{id: id}, acc ->
+      case lc_link(graph, {:__self__, id}) do
+        [] ->
+          acc
+        links ->
+          chain = links
+          |> Enum.reduce([], fn
+            ({_, {:__self__, _}}, acc) ->
+              acc
+            ({_, {node_id, _}}, acc)   ->
+              node = GraphProto.node(graph, node_id)
+              chain = longest_chain(graph, node_type, node)
+              lc_max_list(chain, acc)
+          end)
+          lc_max_list(chain, acc)
+      end
+    end)
+    if length(lchain) == 0 do
+      []
+    else
+      graph = lc_graph_update(graph, lchain)
+      [lchain | longest_chain(graph, node_type)]
+    end
+  end
+
   defp longest_chain(graph, type, node, current \\ [], max \\ []) do
-    {current, max} = case node.type do
-      ^type -> {current ++ [node], max}
-      _     -> {[], lc_max_list(current, max)}
+    {current, max} = cond do
+      !lc_check_inputs?(List.last(current), node, graph) ->
+        {[], lc_max_list(current, max)}
+      node.type == type ->
+        {current ++ [node], max}
+      true ->
+        {[], lc_max_list(current, max)}
     end
     case lc_out_nodes(graph, node) do
       [] ->
         lc_max_list(current, max)
+        #[current | max]
       outnodes ->
         Enum.reduce(outnodes, [], fn n, acc ->
           chain = longest_chain(graph, type, n, current, max)
@@ -344,5 +364,90 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       end
     end)
     |> Enum.uniq()
+  end
+
+  defp lc_producer_pins(pin_list, %{nodes: nodes}) do
+    Enum.reduce(nodes, pin_list, fn node, acc ->
+      NodeProto.pins(node, :producer) ++ acc
+    end)
+  end
+
+  defp lc_check_inputs?(nil, _, _), do: true
+  defp lc_check_inputs?(%{id: pid}, %{id: cid} = cnode, %{links: links}) do
+    inpins = cnode
+    |> NodeProto.pins(@input_pins)
+    |> length()
+    links
+    |> Enum.filter(fn
+      {{^pid, _}, {^cid, _}} -> true
+      _                      -> false
+    end)
+    |> length() == inpins
+  end
+
+  defp lc_graph_update(graph, []), do: graph |> IO.inspect
+  defp lc_graph_update(graph, [node | rest]) do
+    index = Enum.find_index(graph.nodes, &(&1.id == node.id))
+    nodes = List.update_at(graph.nodes, index, &(%{&1 | type: "longest_chain_stub"}))
+    graph = %{graph | nodes: nodes}
+    lc_graph_update(graph, rest)
+  end
+
+  #-----------------------------------------------------------------------------
+  # move
+  #-----------------------------------------------------------------------------
+  def move(srcg, %{nodes: []} = dstg, nid) do
+    #case GraphProto.node(srcg, nid) do
+    #  nil   -> compile_error("Node #{nid} do not belongs to #{srcg.id} graph")
+    #  node  ->
+    #    {dictpins, pins} = node
+    #    |> NodeProto.pins(@all_pins)
+    #    |> Enum.reduce({srcg.links, []}, fn %{id: pid}, )
+
+
+    #end
+  end
+
+  defp mv_create_graph(node) do
+    # pinp = node
+    # |> NodeProto.pins(@input_pins)
+    # |> Enum.reduce(%{}, fn pin ->
+    #
+    # end)
+  end
+
+  defp mv_copy_pins(srcgraph, %Graph.Node{pins: npins} = node, %Graph{id: g_id, pins: gpins} = dstgraph) do
+    npins
+    |> Enum.reduce({%{}, dstgraph}, fn pin, {names, graph} ->
+      nbrs = mv_neighbours(pin, node, srcgraph)
+      if List.keymember?(nbrs, g_id, 0) and length(nbrs) == 1 do
+        {names, graph}
+      else
+        id = pin.id
+        pin = %{pin | id: UUID.uuid1()}
+        graph = %{graph | pins: [pin | graph.pins]}
+        {Map.put(names, id, pin.id), graph}
+      end
+    end)
+  end
+
+  defp mv_neighbours(pin, node, graph) do
+    link_part = {node.id, pin.id}
+    Enum.reduce(graph.links, [], fn
+      {^link_part, {n_id, p_id}}, acc ->
+        case List.keyfind(acc, n_id, 0) do
+          nil ->
+            [{n_id, [p_id]} | acc]
+          {id, pins} ->
+            List.keyreplace(acc, n_id, 0, {n_id, [p_id | pins]})
+        end
+      {{n_id, p_id},^link_part}, acc ->
+        case List.keyfind(acc, n_id, 0) do
+          nil ->
+            [{n_id, [p_id]} | acc]
+          {id, pins} ->
+            List.keyreplace(acc, n_id, 0, {n_id, [p_id | pins]})
+        end
+    end)
   end
 end

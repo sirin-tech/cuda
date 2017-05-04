@@ -281,4 +281,12 @@ defmodule Cuda.Test.GraphHelpers do
   def graph(opts) do
     %Graph{} |> Map.merge(opts |> Enum.into(%{}))
   end
+
+  def listnode2id([]), do: []
+  def listnode2id([val | rest]) when is_list(val) do
+    [Enum.map(val, &(&1.id)) | listnode2id(rest)]
+  end
+  def listnode2id([val | rest]) do
+    [val.id | listnode2id(rest)]
+  end
 end

@@ -56,18 +56,6 @@ defmodule Cuda.Graph do
     end
   end
 
-  @doc """
-  Move node from source graph into destination graph, when destination graph
-  is nested into source graph and moving node belongs to source graph
-  """
-  @spec move(source_graph :: t, destination_graph :: t, node_id :: term) :: t
-  def move(srcg, _dstg, nid) do
-    case GraphProto.node(srcg, nid) do
-      nil   -> compile_error("Node #{nid} do not belongs to #{srcg.id} graph")
-      _node -> nil
-    end
-  end
-
   def link(%__MODULE__{links: links} = graph, {sn, sp} = src, {dn, dp} = dst) do
     # node to node connection
     with {:src, %{} = src_node} <- {:src, GraphProto.node(graph, sn)},
