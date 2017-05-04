@@ -19,6 +19,7 @@ ETERM *DriverError::AsTerm() {
   const char *name, *str;
   if (cuGetErrorName(code, &name) == CUDA_SUCCESS &&
       cuGetErrorString(code, &str) == CUDA_SUCCESS) {
+    // DEBUG("DeviceError: " << name << ", " << str);
     return FORMAT("{~a,~w,~w,~w}", ERROR_STR,
       erl_mk_binary(source.c_str(), source.size()),
       erl_mk_binary(name, strlen(name)),

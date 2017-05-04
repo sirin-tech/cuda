@@ -3,7 +3,7 @@
 #include "driver.h"
 
 Driver::Driver(int deviceNo) {
-  DEBUG("Enter Driver constructor");
+  DEBUG("Enter Driver constructor for device: " << deviceNo);
   CUresult result = CUDA_SUCCESS;
   result = cuDeviceGet(&device, deviceNo);
   if (result != CUDA_SUCCESS) throw DriverError(result);
@@ -81,17 +81,58 @@ DeviceMemory *Driver::GetMemory(int id) {
   return mem->second;
 }
 
-void Driver::Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
-                 int bx, int by, int bz, RunParameters &params) {
+void Driver::Run(int moduleNo, RunParameters &params, std::shared_ptr<RunArguments> &args) {
   auto module = modules.find(moduleNo);
   if (module == modules.end()) throw StringError("Invalid module handle");
+
   CUfunction func;
+  std::string funcName;
+  int gx, gy, gz, bx, by, bz;
+
+  std::tie(funcName, gx, gy, gz, bx, by, bz) = params;
   auto result = cuModuleGetFunction(&func, module->second, funcName.c_str());
   if (result != CUDA_SUCCESS) throw DriverError(result);
-  // void **paramsPtr = params.empty() ? NULL : args.data();
+  // void **paramsPtr = args.empty() ? NULL : args.data();
 
-  result = cuLaunchKernel(func, gx, gy, gz, bx, by, bz, 0, 0, params.GetPtr(), 0);
+  result = cuLaunchKernel(func, gx, gy, gz, bx, by, bz, 0, 0, args->GetPtr(), 0);
   if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:execution");
+}
+
+void Driver::Stream(int moduleNo, std::vector<RunEnvironment> &batch) {
+  auto module = modules.find(moduleNo);
+  if (module == modules.end()) throw StringError("Invalid module handle");
+
+  CUstream stream;
+  CUfunction func;
+  CUresult result;
+  std::string funcName;
+  int gx, gy, gz, bx, by, bz;
+
+  result = cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_create");
+
+  for (auto it = batch.begin(); it != batch.end(); ++it) {
+    std::shared_ptr<RunArguments> args;
+    RunParameters params;
+
+    std::tie(params, args) = *it;
+    std::tie(funcName, gx, gy, gz, bx, by, bz) = params;
+
+    result = cuModuleGetFunction(&func, module->second, funcName.c_str());
+    if (result != CUDA_SUCCESS) throw DriverError(result);
+
+    DEBUG("Launch DriverPort::Stream");
+    result = cuLaunchKernel(func, gx, gy, gz, bx, by, bz, 0, stream, args->GetPtr(), 0);
+    DEBUG("Exit DriverPort::Stream");
+    if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:execution");
+    DEBUG("Exit 1 DriverPort::Stream");
+  }
+
+  DEBUG("Wait DriverPort::Stream");
+  result = cuStreamSynchronize(stream);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_wait");
+  result = cuStreamDestroy(stream);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_free");
 }
 
 template <> DeviceMemory *Driver::Unpack<DeviceMemory *>(ETERM *value) {

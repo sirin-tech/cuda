@@ -66,6 +66,7 @@ ETERM *DriverPort::HandleTermFunction(std::string name, ETERM *arg) {
   if (name == "memory_unload") return MemoryUnload(arg);
   if (name == "module_load") return ModuleLoad(arg);
   if (name == "run") return Run(arg);
+  if (name == "stream") return Stream(arg);
   return NULL;
 }
 
@@ -141,7 +142,7 @@ ETERM *DriverPort::Run(ETERM *arg) {
   std::string func((char *)ERL_BIN_PTR(funcTerm), erl_size(funcTerm));
   int gx = 1, gy = 1, gz = 1;
   int bx = 1, by = 1, bz = 1;
-  RunParameters args;
+  std::shared_ptr<RunArguments> argsPtr;
 
   if (argc > 2) {
     ETERM *grid = NULL;
@@ -193,33 +194,59 @@ ETERM *DriverPort::Run(ETERM *arg) {
         throw StringError("Bad argument");
       }
     }
-    if (params) {
-      if (!ERL_IS_LIST(params)) throw StringError("Bad argument");
-      auto s = erl_length(params);
-      for (int i = 0; i < s; i++) {
-        auto param = erl_hd(params);
-        params = erl_tl(params);
-        if (ERL_IS_TUPLE(param)) {
-          auto param_type = erl_element(1, param);
-          auto param_value = erl_element(2, param);
-          if (ERL_IS_ATOM(param_type) && ATOM_EQ(param_type, "memory")) {
-            auto mem = driver->GetMemory(Get<int>(param_value));
-            if (!mem) throw StringError("Invalid memory handle");
-            args.Add(*mem);
-          }
-        } else if (ERL_IS_INTEGER(param)) {
-          args.Add(ERL_INT_VALUE(param));
-        } else if (ERL_IS_FLOAT(param)) {
-          float f = ERL_FLOAT_VALUE(param);
-          args.Add(f);
-        } else {
-          throw StringError("Bad argument");
-        }
-      }
-    }
+    argsPtr = params ? UnpackRunArguments(params) : NULL;
   }
 
-  driver->Run(module, func, gx, gy, gz, bx, by, bz, args);
+  auto params = std::make_tuple(func, gx, gy, gz, bx, by, bz);
+  driver->Run(module, params, argsPtr);
+  DEBUG("Leave DriverPort::Run");
+  return erl_mk_atom(OK_STR);
+}
+
+ETERM *DriverPort::Stream(ETERM *arg) {
+  DEBUG("Enter DriverPort::Stream");
+  if (!ERL_IS_TUPLE(arg)) throw StringError("Bad argument");
+  auto argc = erl_size(arg);
+  if (argc < 2) throw StringError("Bad argument");
+  auto moduleTerm = erl_element(1, arg);
+  auto batchTerm  = erl_element(2, arg);
+  if (!ERL_IS_LIST(batchTerm)) throw StringError("Bad argument");
+
+  auto module = GetModuleIndex(moduleTerm);
+  std::vector<RunEnvironment> batch;
+
+  auto s = erl_length(batchTerm);
+  for (int i = 0; i < s; i++) {
+    auto item = erl_hd(batchTerm);
+    batchTerm = erl_tl(batchTerm);
+
+    if (!ERL_IS_TUPLE(item)) throw StringError("Bad argument");
+    if (erl_size(item) != 4) throw StringError("Bad argument");
+    auto funcTerm = erl_element(1, item);
+    auto bTerm    = erl_element(2, item);
+    auto gTerm    = erl_element(3, item);
+    auto argsTerm = erl_element(4, item);
+
+    std::string func((char *)ERL_BIN_PTR(funcTerm), erl_size(funcTerm));
+
+    if (!ERL_IS_TUPLE(bTerm)) throw StringError("Bad argument");
+    if (erl_size(bTerm) != 3) throw StringError("Bad argument");
+    auto bx = ERL_INT_VALUE(erl_element(1, bTerm));
+    auto by = ERL_INT_VALUE(erl_element(2, bTerm));
+    auto bz = ERL_INT_VALUE(erl_element(3, bTerm));
+
+    if (!ERL_IS_TUPLE(gTerm)) throw StringError("Bad argument");
+    if (erl_size(gTerm) != 3) throw StringError("Bad argument");
+    auto gx = ERL_INT_VALUE(erl_element(1, gTerm));
+    auto gy = ERL_INT_VALUE(erl_element(2, gTerm));
+    auto gz = ERL_INT_VALUE(erl_element(3, gTerm));
+
+    auto args = UnpackRunArguments(argsTerm);
+    auto params = std::make_tuple(func, gx, gy, gz, bx, by, bz);
+    batch.push_back(std::make_tuple(params, args));
+  }
+
+  driver->Stream(module, batch);
   return erl_mk_atom(OK_STR);
 }
 
@@ -227,4 +254,32 @@ ETERM *DriverPort::MemoryLoad(RawData &data, size_t size) {
   DEBUG("Enter DriverPort::MemoryLoad");
   int n = driver->LoadMemory(data.get(), size);
   return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(n));
+}
+
+std::shared_ptr<RunArguments> DriverPort::UnpackRunArguments(ETERM *term) {
+  std::shared_ptr<RunArguments> args = std::make_shared<RunArguments>(RunArguments());
+
+  if (!ERL_IS_LIST(term)) throw StringError("Bad argument");
+  auto s = erl_length(term);
+  for (int i = 0; i < s; i++) {
+    auto param = erl_hd(term);
+    term = erl_tl(term);
+    if (ERL_IS_TUPLE(param)) {
+      auto param_type = erl_element(1, param);
+      auto param_value = erl_element(2, param);
+      if (ERL_IS_ATOM(param_type) && ATOM_EQ(param_type, "memory")) {
+        auto mem = driver->GetMemory(Get<int>(param_value));
+        if (!mem) throw StringError("Invalid memory handle");
+        args->Add(*mem);
+      }
+    } else if (ERL_IS_INTEGER(param)) {
+      args->Add(ERL_INT_VALUE(param));
+    } else if (ERL_IS_FLOAT(param)) {
+      float f = ERL_FLOAT_VALUE(param);
+      args->Add(f);
+    } else {
+      throw StringError("Bad argument");
+    }
+  }
+  return args;
 }

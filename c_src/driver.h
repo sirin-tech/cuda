@@ -2,6 +2,7 @@
 #define __DRIVER_H__
 
 #include <vector>
+#include <memory>
 
 #include "common.h"
 
@@ -78,13 +79,14 @@ public:
   }
 };
 
-class RunParameters {
+class RunArguments {
 private:
   std::vector<void *> values;
 public:
-  ~RunParameters() {
-    DEBUG("Run parameters destroyed");
+  ~RunArguments() {
+    DEBUG("Run arguments destroyed");
     for (auto it = values.begin(); it != values.end(); ++it) std::free(*it);
+    values.clear();
   }
 
   template <typename T> void Add(T param) {
@@ -118,6 +120,9 @@ public:
   virtual ETERM *AsTerm();
 };
 
+typedef std::tuple<std::string, int, int, int, int, int, int> RunParameters;
+typedef std::tuple<RunParameters, std::shared_ptr<RunArguments>> RunEnvironment;
+
 class Driver {
 private:
   CUdevice    device;
@@ -134,8 +139,8 @@ public:
   void ReadMemory(int id, void *dst, int size = -1);
   int GetMemorySize(int id);
   DeviceMemory *GetMemory(int id);
-  void Run(int moduleNo, std::string funcName, int gx, int gy, int gz,
-           int bx, int by, int bz, RunParameters &params);
+  void Run(int moduleNo, RunParameters &params, std::shared_ptr<RunArguments> &args);
+  void Stream(int moduleNo, std::vector<RunEnvironment> &batch);
   template <typename T> T Unpack(ETERM *value);
   ETERM *PackMemory(int idx);
   ETERM *PackModule(int idx);

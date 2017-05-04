@@ -1,8 +1,3 @@
-alias Cuda.Graph
-alias Cuda.Node
-alias Cuda.Graph.Pin
-alias Cuda.Graph.NodeProto
-
 defmodule Cuda.Graph.GPUNode do
   @moduledoc """
   Represents a graph node that will be executed on GPU.
@@ -17,12 +12,17 @@ defmodule Cuda.Graph.GPUNode do
 
     def __ptx__(_opts, _env) do
       \"\"\"
-        some ptx code
+      some ptx code
       \"\"\"
     end
   end
   ```
   """
+
+  alias Cuda.Graph
+  alias Cuda.Node
+  alias Cuda.Graph.Pin
+  alias Cuda.Graph.NodeProto
 
   require Cuda
 

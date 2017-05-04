@@ -92,6 +92,10 @@ defmodule Cuda do
     GenServer.call(pid, {:call, :run, {module, func, block, grid, params}})
   end
 
+  def stream(pid, module, batch) do
+    GenServer.call(pid, {:call, :stream, {module, batch}})
+  end
+
   def init(opts) do
     cmd = case Keyword.get(opts, :port_bin) do
       nil  -> Application.app_dir(:cuda, Path.join(~w(priv cuda_driver_port)))
@@ -119,9 +123,12 @@ defmodule Cuda do
 
   defp wait_reply(port) do
     receive do
-      {^port, {:data, @term_call <> data}} -> {:reply, :erlang.binary_to_term(data), port}
-      {^port, {:data, @raw_call <> data}} -> {:reply, {:ok, data}, port}
-      _ -> {:reply, {:error, "Port communication error"}, port}
+      {^port, {:data, @term_call <> data}} ->
+        {:reply, :erlang.binary_to_term(data), port}
+      {^port, {:data, @raw_call <> data}} ->
+        {:reply, {:ok, data}, port}
+      _ ->
+        {:reply, {:error, "Port communication error"}, port}
     end
   end
 

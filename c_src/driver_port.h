@@ -12,12 +12,15 @@ protected:
   virtual ETERM *HandleTermFunction(std::string name, ETERM *arg);
   virtual ETERM *HandleRawFunction(std::string name, RawData &data, size_t size);
 
+  std::shared_ptr<RunArguments> UnpackRunArguments(ETERM *term);
+
   ETERM *Compile(ETERM *arg);
   ETERM *MemoryRead(ETERM *arg);
   ETERM *MemoryUnload(ETERM *arg);
   ETERM *ModuleLoad(ETERM *arg);
   ETERM *Run(ETERM *arg);
   ETERM *MemoryLoad(RawData &data, size_t size);
+  ETERM *Stream(ETERM *arg);
 public:
   DriverPort(int device);
   ~DriverPort();
