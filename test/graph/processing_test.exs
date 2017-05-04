@@ -129,40 +129,48 @@ defmodule Graph.ProcessingTest do
   end
 
   describe "longest_chain/2" do
+    defp normalize([]), do: []
+    defp normalize(result) do
+      result
+      |> nodes2ids()
+      |> Enum.map(&(length(&1)))
+      |> Enum.sort()
+    end
+
     test "finds the longest chain in graph" do
 
       assert :longest_chain_test
       |> graph()
       |> longest_chain(:gpu)
-      |> length() == 3
+      |> normalize() == [1, 1, 1, 2, 2]
 
       # [i1]──▶⎡input1 (a) output1⎤──▶[o1]
       # [i2]──▶⎣input2     output2⎦──▶[o2]
       assert :i2_double1_o2
       |> graph()
       |> longest_chain(:gpu)
-      |> length() == 0
+      |> normalize() == []
 
       # [i]──▶[input (a) output]─┬──────────────────────▶[o1]
       #                          └─▶[input (b) output]──▶[o2]
       assert :i1_single1_single1_o2
       |> graph()
       |> longest_chain(:virtual)
-      |> length() == 2
+      |> normalize() == [2]
 
       # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
       #                            └─▶[input (c) output]───────────────────────▶[o2]
       assert :i1_single4_o2
       |> graph()
       |> longest_chain(:virtual)
-      |> length() == 3
+      |> normalize() == [1, 3]
 
       # [i1]──▶[input (a) output]──┬──[input (b) output]───────────────────────▶[o1]
       #                            └─▶[input (c) output]──▶[input (d) output]──▶[o2]
       assert :i1_single4_o2_inverse
       |> graph()
       |> longest_chain(:virtual)
-      |> length() == 3
+      |> normalize() == [1, 3]
 
       #      ┌───▶[input (a) output]───▶[input (c) output]───▶[o1]
       # [i1]─│
@@ -170,7 +178,7 @@ defmodule Graph.ProcessingTest do
       assert :i1_single3_o2
       |> graph()
       |> longest_chain(:virtual)
-      |> length() == 2
+      |> normalize() == [1, 2]
 
       #      ┌───▶[input (a) output]─────────────────────────▶[o1]
       # [i1]─│
@@ -178,7 +186,14 @@ defmodule Graph.ProcessingTest do
       assert :i1_single3_o2_inverse
       |> graph()
       |> longest_chain(:virtual)
-      |> length() == 2
+      |> normalize() == [1, 2]
+
+      # [i1]─────▶[input (a) output]─────────────────────────▶[o1]
+      #           [    (b) producer]───▶[input (c) output]───▶[o2]
+      assert :i1_producer1_single2_o2
+      |> graph()
+      |> longest_chain(:virtual)
+      |> normalize() == [1, 1]
     end
 
     test "detects loops" do

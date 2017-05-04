@@ -38,6 +38,20 @@ defmodule Cuda.Test.GraphHelpers do
     end
   end
 
+  defmodule Producer do
+    @moduledoc """
+    Implements node with one producer pin and specific type.
+    Type is set by using a key :type in options.
+    """
+    use Node
+    def __pins__(_, _) do
+      [producer(:producer, :i8)]
+    end
+    def __type__(opts, _) do
+      Keyword.get(opts, :type, :virtual)
+    end
+  end
+
   defmodule Custom do
     @moduledoc """
     Implements node with custom number of input and output pins and specific type.
@@ -48,8 +62,8 @@ defmodule Cuda.Test.GraphHelpers do
     use Node
     def __pins__(opts, _) do
       {i, o} = Keyword.get(opts, :io)
-      inputs =  for x <- 1..i, do: input(String.to_atom("input#{x}"), :i8)
-      outputs = for x <- 1..o, do: output(String.to_atom("output#{x}"), :i8)
+      inputs =  i > 0 && (for x <- 1..i, do: input(String.to_atom("input#{x}"), :i8))   || []
+      outputs = o > 0 && (for x <- 1..o, do: output(String.to_atom("output#{x}"), :i8)) || []
       inputs ++ outputs
     end
     def __type__(opts, _) do
@@ -234,6 +248,22 @@ defmodule Cuda.Test.GraphHelpers do
     |> link({:a, :output}, :o1)
     |> link({:c, :output}, :o2)
   end
+  # [i1]─────▶[input (a) output]─────────────────────────▶[o1]
+  #           [    (b) producer]───▶[input (c) output]───▶[o2]
+  def graph(:i1_producer1_single2_o2) do
+    graph(id: :graph,
+          pins: [
+            %Pin{id: :i1, type: :input, data_type: :i8},
+            %Pin{id: :o1, type: :output, data_type: :i8},
+            %Pin{id: :o2, type: :output, data_type: :i8}])
+    |> add(:a, Single)
+    |> add(:b, Producer)
+    |> add(:c, Single)
+    |> link(:i1, {:a, :input})
+    |> link({:b, :producer}, {:c, :input})
+    |> link({:a, :output}, :o1)
+    |> link({:c, :output}, :o2)
+  end
   def graph(:longest_chain_test) do
     graph(id: :graph,
           pins: [
@@ -282,11 +312,15 @@ defmodule Cuda.Test.GraphHelpers do
     %Graph{} |> Map.merge(opts |> Enum.into(%{}))
   end
 
-  def listnode2id([]), do: []
-  def listnode2id([val | rest]) when is_list(val) do
-    [Enum.map(val, &(&1.id)) | listnode2id(rest)]
+  @doc """
+  Converts nodes to it's ids
+  """
+  @spec nodes2ids([Cuda.Graph.Node.t]) :: [term]
+  def nodes2ids([]), do: []
+  def nodes2ids([val | rest]) when is_list(val) do
+    [Enum.map(val, &(&1.id)) | nodes2ids(rest)]
   end
-  def listnode2id([val | rest]) do
-    [val.id | listnode2id(rest)]
+  def nodes2ids([val | rest]) do
+    [val.id | nodes2ids(rest)]
   end
 end

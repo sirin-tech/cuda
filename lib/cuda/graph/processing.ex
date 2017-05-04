@@ -15,9 +15,9 @@ defprotocol Cuda.Graph.Processing do
   def topology_sort(graph)
 
   @doc """
-  Finds longest node chain with specific type
+  Finds longest chains of specific node type all over the graph
   """
-  @spec longest_chain(graph :: Graph.t, node_type :: Node.type) :: [any] # [node]
+  @spec longest_chain(graph :: Graph.t, node_type :: Node.type) :: [[Graph.Node.t]]
   def longest_chain(graph, node_type)
 
   @doc """
@@ -39,7 +39,6 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   @input_pins  ~w(input consumer)a
   @output_pins ~w(output producer)a
-  @any_pins ~w(input consumer output producer)a
 
   # ----------------------------------------------------------------------------
   # dfs
@@ -290,8 +289,9 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> expand
     |> NodeProto.pins(@input_pins)
     |> lc_producer_pins(graph)
-    |> Enum.reduce([], fn %Pin{id: id}, acc ->
-      case lc_link(graph, {:__self__, id}) do
+    #%Pin{id: id}
+    |> Enum.reduce([], fn link_part, acc ->
+      case lc_link(graph, link_part) do
         [] ->
           acc
         links ->
@@ -347,7 +347,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     length(list1) > length(list2) && list1 || list2
   end
 
-  def lc_out_nodes(graph, node) do
+  defp lc_out_nodes(graph, node) do
     node
     |> NodeProto.pins(:output)
     |> Enum.reduce([], fn %Pin{id: id}, acc ->
@@ -367,8 +367,12 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   end
 
   defp lc_producer_pins(pin_list, %{nodes: nodes}) do
+    pin_list = pin_list != [] && Enum.map(pin_list, &({:__self__, &1.id})) || []
     Enum.reduce(nodes, pin_list, fn node, acc ->
-      NodeProto.pins(node, :producer) ++ acc
+      pins = node
+      |> Cuda.Graph.NodeProto.pins(:producer)
+      |> Enum.map(&({node.id, &1.id}))
+      pins ++ acc
     end)
   end
 
@@ -385,7 +389,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> length() == inpins
   end
 
-  defp lc_graph_update(graph, []), do: graph |> IO.inspect
+  defp lc_graph_update(graph, []), do: graph
   defp lc_graph_update(graph, [node | rest]) do
     index = Enum.find_index(graph.nodes, &(&1.id == node.id))
     nodes = List.update_at(graph.nodes, index, &(%{&1 | type: "longest_chain_stub"}))
