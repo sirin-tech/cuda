@@ -1,4 +1,4 @@
-defmodule Graph.ProcessingTest do
+defmodule Cuda.Graph.ProcessingTest do
   use ExUnit.Case
   alias Cuda.Graph.Processing
 

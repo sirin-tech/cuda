@@ -1,4 +1,4 @@
-defmodule EnvTest do
+defmodule Cuda.EnvTest do
   use ExUnit.Case
   import Cuda.Env
   import Cuda.Env.Validation

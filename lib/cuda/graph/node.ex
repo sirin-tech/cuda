@@ -26,12 +26,14 @@ defmodule Cuda.Graph.Node do
   alias Cuda.Graph.Pin
   alias Cuda.Graph.NodeProto
 
-  @type type :: :gpu | :host | :virtual | :graph
+  @type type :: :gpu | :host | :virtual | :graph | :computation_graph
+  @type options :: keyword
   @type t :: %__MODULE__{
     id: Graph.id,
     module: module,
     type: type,
-    pins: [Pin.t]
+    pins: [Pin.t],
+    options: options
   }
 
   @doc """
@@ -42,7 +44,7 @@ defmodule Cuda.Graph.Node do
 
   By default it will be `Cuda.Graph.Node`.
   """
-  @callback __proto__(opts :: keyword, env :: keyword) :: atom
+  @callback __proto__(opts :: options, env :: Cuda.Env.t) :: atom
 
   @doc """
   Provides a complete pin list for newly created node.
@@ -50,7 +52,7 @@ defmodule Cuda.Graph.Node do
   You can use `pin/3`, `input/2`, `output/2`, `consumer/2` and `producer/2`
   helpers here.
   """
-  @callback __pins__(opts :: keyword, env :: keyword) :: [Pin.t]
+  @callback __pins__(opts :: options, env :: Cuda.Env.t) :: [Pin.t]
 
   @doc """
   Provides a node type.
@@ -65,12 +67,14 @@ defmodule Cuda.Graph.Node do
   * `:gpu`     - node affects GPU and optionally CPU workflows
   * `:graph`   - node with graph nested in it
   """
-  @callback __type__(opts :: keyword, env :: keyword) :: type
-
-  @exports [consumer: 2, input: 2, output: 2, pin: 3, producer: 2]
+  @callback __type__(opts :: options, env :: Cuda.Env.t) :: type
 
   @derive [NodeProto]
-  defstruct [:id, :module, :type, pins: []]
+  defstruct [:id, :module, :type, pins: [], options: []]
+
+  @exports [consumer: 2, input: 2, output: 2, pin: 3, producer: 2]
+  @input_pins  ~w(input consumer)a
+  @output_pins ~w(output producer)a
 
   defmacro __using__(_opts) do
     quote do
@@ -79,6 +83,14 @@ defmodule Cuda.Graph.Node do
       def __proto__(_opts, _env), do: unquote(__MODULE__)
       defoverridable __proto__: 2
     end
+  end
+
+  defmacro input_pin_types() do
+    quote(do: unquote(@input_pins))
+  end
+
+  defmacro output_pin_types() do
+    quote(do: unquote(@output_pins))
   end
 
   @doc """
@@ -147,7 +159,7 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
   require Cuda
   alias Cuda.Graph.Pin
 
-  @types ~w(gpu host virtual graph)a
+  @types ~w(gpu host virtual graph computation_graph)a
   @reserved_names ~w(input output)a
 
   def new(_, id, module, opts \\ [], env \\ []) do
@@ -172,7 +184,8 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
         Cuda.compile_error("Invalid connector list supploed")
       end
 
-      struct(Cuda.Graph.Node, id: id, module: module, type: type, pins: pins)
+      struct(Cuda.Graph.Node, id: id, module: module, type: type, pins: pins,
+                              options: opts)
     else
       _ -> Cuda.compile_error("Node module #{module} could not be loaded")
     end

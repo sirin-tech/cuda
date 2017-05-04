@@ -1,4 +1,4 @@
-defmodule CudaTest do
+defmodule Cuda.CudaTest do
   use ExUnit.Case
   doctest Cuda
 

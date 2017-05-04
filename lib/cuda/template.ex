@@ -4,24 +4,25 @@ defmodule Cuda.Template do
   """
 
   @type options :: [
-    context: Cuda.Template.Context.t,
-    ptx_helpers: [],
-    c_helpers: []]
+    context: Cuda.Compiler.Context.t,
+    ptx_helpers: [], # ? - subject to remove - use helpers option
+    c_helpers: [],   # ? - subject to remove - use helpers option
+    helpers: []]
 
   @doc """
   Preprocesses PTX template
   """
-  @spec ptx_preprocess(template :: String.t, opts :: options) :: String.t
+  @spec ptx_preprocess(template :: String.t, opts :: options) :: {:ptx, String.t}
   def ptx_preprocess(template, opts) do
-    ptx_eval(template, opts)
+    {:ptx, ptx_eval(template, opts)}
   end
 
   @doc """
   Preprocesses C template
   """
-  @spec c_preprocess(template :: String.t, opts :: options) :: String.t
+  @spec c_preprocess(template :: String.t, opts :: options) :: {:c, String.t}
   def c_preprocess(template, opts) do
-    c_eval(template, opts)
+    {:c, c_eval(template, opts)}
   end
 
   @doc """
@@ -29,7 +30,9 @@ defmodule Cuda.Template do
   """
   @spec ptx_eval(template :: String.t, opts :: options) :: String.t
   def ptx_eval(template, opts) do
-    hlprs = [Cuda.Template.Helpers | Keyword.get(opts, :ptx_helpers, [])]
+    hlprs = [Cuda.Template.Helpers] ++
+            Keyword.get(opts, :ptx_helpers, []) ++
+            Keyword.get(opts, :helpers, [])
     ctx = Keyword.get(opts, :context)
     eval(template, ctx, hlprs)
   end
@@ -39,7 +42,9 @@ defmodule Cuda.Template do
   """
   @spec c_eval(template :: String.t, opts :: options) :: String.t
   def c_eval(template, opts) do
-    hlprs = [Cuda.Template.Helpers | Keyword.get(opts, :c_helpers, [])]
+    hlprs = [Cuda.Template.Helpers] ++
+            Keyword.get(opts, :c_helpers, []) ++
+            Keyword.get(opts, :helpers, [])
     ctx = Keyword.get(opts, :context)
     eval(template, ctx, hlprs)
   end

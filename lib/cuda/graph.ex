@@ -20,16 +20,18 @@ defmodule Cuda.Graph do
     pins: [Pin.t],
     nodes: [Node.t],
     links: [{link, link}],
+    options: Node.options
   }
 
   @type dfs_action :: :enter | :move | :leave
   @type dfs_result :: {:ok | :error | atom, state :: any}
   @type dfs_callback :: (action :: dfs_action, arg :: any, state :: any -> dfs_result)
 
-  @callback __graph__(graph :: t, opts :: keyword, env :: keyword) :: t
+  @callback __graph__(graph :: t, opts :: Node.options, env :: Cuda.Env.t) :: t
 
   @derive [NodeProto, GraphProto]
-  defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: []]
+  defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: [],
+             options: []]
 
   @self :__self__
   @input_pins  ~w(input consumer)a
@@ -131,16 +133,20 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph do
   Creates new graph node
   """
   def new(_, id, module, opts \\ [], env \\ []) do
-    proto = Node.proto(module, opts, env)
-    graph = %Node{}
-            |> Cuda.Graph.Factory.new(id, module, opts, env)
-            |> Map.from_struct
-    graph = struct(proto, graph)
-    graph = case function_exported?(module, :__graph__, 3) do
-      true -> module.__graph__(graph, opts, env)
-      _    -> graph
+    with {:module, module} <- Code.ensure_loaded(module) do
+      proto = Node.proto(module, opts, env)
+      graph = %Node{}
+              |> Cuda.Graph.Factory.new(id, module, opts, env)
+              |> Map.from_struct
+      graph = struct(proto, graph)
+      graph = case function_exported?(module, :__graph__, 3) do
+        true -> module.__graph__(graph, opts, env)
+        _    -> graph
+      end
+      # graph = graph |> Graph.expand()
+      graph
+    else
+      _ -> Cuda.compile_error("Node module #{module} could not be loaded")
     end
-    # graph = graph |> Graph.expand()
-    graph
   end
 end

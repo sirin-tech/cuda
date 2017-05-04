@@ -1,4 +1,4 @@
-defmodule GraphTest do
+defmodule Cuda.GraphTest do
   use ExUnit.Case
   alias Cuda.Graph
   alias Cuda.Graph.Node

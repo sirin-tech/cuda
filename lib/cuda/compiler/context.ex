@@ -1,6 +1,6 @@
-defmodule Cuda.Template.Context do
+defmodule Cuda.Compiler.Context do
   @moduledoc """
-  Structure fot Cuda.Template module
+  Compilation context
   """
 
   @type t :: %__MODULE__{
