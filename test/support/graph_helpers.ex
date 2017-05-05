@@ -324,6 +324,14 @@ defmodule Cuda.Test.GraphHelpers do
     [val.id | nodes2ids(rest)]
   end
 
+  def connected?(graph, current_node_id, next_node_id) do
+    graph = Cuda.Graph.Processing.expand(graph)
+    graph.links
+    |> Enum.any?(fn
+      {{^current_node_id, _}, {^next_node_id, _}} -> true
+    end)
+  end
+
   # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
   #                            └─▶[input (c) output]───────────────────────▶[o2]
   def tst_mv_graph() do

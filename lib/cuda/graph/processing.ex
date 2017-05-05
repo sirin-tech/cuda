@@ -410,7 +410,17 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     %{srcg | nodes: nodes}
   end
   def move(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
-    shrdlinks = mv_shared_links(srcg.links, nid, dstg_id)
+    {srcg, dstg} = mv_shared_links(srcg, dstg, node)
+    {dictpins, dstg} = dstg
+    |> mv_copy_pins(mv_pins_to_copy(srcg, dstg, node))
+    srcg = mv_links_redirect(srcg, dstg_id, nid, dictpins)
+    srcg = %{srcg | nodes: List.delete(srcg.nodes, node)}
+    dstg = mv_add_node(dstg, node, dictpins)
+    nodes = Enum.map(srcg.nodes, fn
+      %{id: ^dstg_id} -> dstg
+      node            -> node
+    end)
+    %{srcg | nodes: nodes}
   end
   def move(srcg, dstg_id, node_id) do
     dstg = mv_get_node(srcg, dstg_id)
@@ -440,30 +450,14 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   end
 
   defp mv_links_redirect(srcg, dstg_id, node_id, dict) do
-    links = Enum.map(srcg.links, fn
-      {{^node_id, pid}, other} -> {{dstg_id, dict[pid]}, other}
-      {other, {^node_id, pid}} -> {other, {dstg_id, dict[pid]}}
-      link                     -> link
+    links = Enum.reduce(srcg.links, [], fn
+      {{^node_id, _}, {^dstg_id, _}}, acc -> acc
+      {{^dstg_id, _}, {^node_id, _}}, acc -> acc
+      {{^node_id, pid}, other}, acc       -> [{{dstg_id, dict[pid]}, other} | acc]
+      {other, {^node_id, pid}}, acc       -> [{other, {dstg_id, dict[pid]}} | acc]
+      link, acc                           -> [link | acc]
     end)
     %{srcg | links: links}
-  end
-
-  defp mv_shared_links(links, nid1, nid2) do
-    links
-    |> Enum.filter(fn
-      {{^nid1, _}, {^nid2, _}} -> true
-      {{^nid2, _}, {^nid1, _}} -> true
-      _                        -> false
-    end)
-  end
-
-  defp mv_shared_pins(links, trgtid, nghbrid) do
-    links
-    |> Enum.reduce([], fn
-      {{^trgtid, pid}, {^nghbrid, _}}, acc -> [pid | acc]
-      {{^nghbrid, _}, {^trgtid, pid}}, acc -> [pid | acc]
-      _, acc                               -> acc
-    end)
   end
 
   defp mv_copy_pins(graph, pins) do
@@ -475,5 +469,62 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       dict = Map.put(dict, id, pin.id)
       {dict, graph}
     end)
+  end
+
+  defp mv_pins_to_copy(srcg, %{id: dstg_id}, %{id: nid} = node) do
+    srcg.links
+    |> Enum.reduce([], fn
+      {{^nid, _}, {^dstg_id, _}}, acc -> acc
+      {{^dstg_id, _}, {^nid, _}}, acc -> acc
+      {{^nid, pnid}, _}, acc          -> [NodeProto.pin(node, pnid) | acc]
+      {_, {^nid, pnid}}, acc          -> [NodeProto.pin(node, pnid) | acc]
+      _, acc                       -> acc
+    end)
+  end
+
+  defp mv_shared_links(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
+    shrlinks = srcg.links
+    |> Enum.filter(fn
+      {{^nid, _}, {^dstg_id, _}} -> true
+      {{^dstg_id, _}, {^nid, _}} -> true
+      _                          -> false
+    end)
+    mv_shared_links(srcg, dstg, node, shrlinks)
+  end
+  defp mv_shared_links(srcg, dstg, _, []), do: {srcg, dstg}
+  defp mv_shared_links(srcg, %{id: dstg_id} = dstg, node, [{{nid, npid}, {did, dpid}} = link | rest]) when did == dstg_id do
+    pin = NodeProto.pin(dstg, dpid)
+    dstg = %{dstg | links: dstg.links
+    |> Enum.map(fn
+      {{:__self__, ^dpid}, rest} -> {{nid, npid}, rest}
+      link                           -> link
+    end)}
+    dstg = %{dstg | pins: List.delete(dstg.pins, pin)}
+    srcg = %{srcg | links: List.delete(srcg.links, link)}
+    mv_shared_links(srcg, dstg, node, rest)
+  end
+  defp mv_shared_links(srcg, %{id: dstg_id} = dstg, node, [{{did, dpid}, {nid, npid}} = link | rest]) when did == dstg_id do
+    pin = NodeProto.pin(dstg, dpid)
+    count = srcg.links
+    |> Enum.filter(fn
+      {{^dstg_id, ^dpid}, _} -> true
+      _                      -> false
+    end)
+    |> length()
+    dstg = if count == 1 do
+      tmp = %{dstg | links: dstg.links
+      |> Enum.map(fn
+        {rest, {:__self__, ^dpid}} -> {rest, {nid, npid}}
+        link                       -> link
+      end)}
+      %{tmp | pins: List.delete(tmp.pins, pin)}
+    else
+      {rest, _} = Enum.find_value(dstg.links, fn
+        {_, {:__self__, ^dpid}} -> true
+      end)
+      %{dstg | links: [{rest, {nid, npid}} | dstg.links]}
+    end
+    srcg = %{srcg | links: List.delete(srcg.links, link)}
+    mv_shared_links(srcg, dstg, node, rest)
   end
 end
