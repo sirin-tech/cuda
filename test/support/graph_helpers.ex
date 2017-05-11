@@ -350,6 +350,16 @@ defmodule Cuda.Test.GraphHelpers do
     [val.id | nodes2ids(rest)]
   end
 
+  def sort_node_ids(nodes) when is_list(nodes) do
+    nodes
+    |> Enum.map(&sort_node_ids/1)
+    |> Enum.sort(fn
+      a, b when is_list(a) and is_list(b) -> length(a) >= length(b)
+      a, b -> a <= b
+    end)
+  end
+  def sort_node_ids(x), do: x
+
   @doc """
   Checks connection and order of connection between two nodes, before it expands the graph
   """

@@ -300,18 +300,21 @@ defmodule Cuda.Graph.ProcessingTest do
 
   describe "precompile_wrap/2" do
     test "wrap graph gpu nodes into computation_graph" do
-      graph = graph(:longest_chain_test)
+      graph  = graph(:longest_chain_test)
       chains = graph
-      |> longest_chain()
-      |> nodes2ids()
-      |> Enum.sort(&(length(&1) >= length(&2)))
-      assert precompile_wrap(graph)
-      graph.nodes
-      |> Enum.reduce([], fn
-        %{type: :computation_graph, nodes: nodes}, acc -> [nodes2ids(nodes) | acc]
-          _, acc                                       -> acc
-      end)
-      |> Enum.sort(&(length(&1) >= length(&2))) == chains
+               |> longest_chain()
+               |> nodes2ids()
+               |> sort_node_ids()
+      graph = precompile_wrap(graph)
+      nodes = graph.nodes
+              |> Enum.reduce([], fn
+                %{type: :computation_graph, nodes: nodes}, acc ->
+                  [nodes2ids(nodes) | acc]
+                _, acc ->
+                  acc
+              end)
+              |> sort_node_ids()
+      assert nodes == chains
     end
   end
 end
