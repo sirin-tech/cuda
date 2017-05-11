@@ -77,24 +77,22 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
   end
 
   def sources(node, ctx) do
-    vars = node.module.__vars__(node.assigns.options, ctx)
-    helpers = node.module.__helpers__(node.assigns.options, ctx)
-    opts = [context: %{ctx | node: node},
-            helpers: [Helpers] ++ helpers,
-            vars: vars |> Enum.into(%{})]
-    ptx = case node.module.__ptx__(node.assigns.options, ctx) do
+    vars = Map.get(node.assigns, :vars, %{}) |> Enum.into(%{})
+    helpers = [Helpers] ++ Map.get(node.assigns, :helpers, [])
+    opts = [context: %{ctx | node: node}, helpers: helpers, vars: vars]
+    ptx = case node.module.__ptx__(node) do
       src when is_bitstring(src) -> [src]
       src when is_list(src)      -> src
       _                          -> []
     end
     ptx = ptx |> Enum.map(& Template.ptx_preprocess(&1, opts))
-    c = case node.module.__c__(node.assigns.options, ctx) do
+    c = case node.module.__c__(node) do
       src when is_bitstring(src) -> [src]
       src when is_list(src)      -> src
       _                          -> []
     end
     c = c |> Enum.map(& Template.c_preprocess(&1, opts))
-    ptx ++ c
+    {:ok, ptx ++ c}
   end
 end
 
@@ -105,9 +103,10 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
   require Logger
 
   def compile(node, ctx) do
-    sources = GPUUnit.sources(node, ctx)
     Logger.info("CUDA: Compiling GPU code for node #{node.module} (#{node.id})")
-    with {:ok, cubin} <- Compiler.compile(sources) do
+    with {:ok, node}    <- node.module.handle_compile(node),
+         {:ok, sources} <- GPUUnit.sources(node, ctx),
+         {:ok, cubin}   <- Compiler.compile(sources) do
       {:ok, NodeProto.assign(node, :cubin, cubin)}
     else
       _ ->

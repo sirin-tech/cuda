@@ -27,8 +27,8 @@ defmodule Cuda.Graph do
   @type dfs_result :: {:ok | :error | atom, state :: any}
   @type dfs_callback :: (action :: dfs_action, arg :: any, state :: any -> dfs_result)
 
-  @callback __graph__(graph :: t, opts :: Node.options, env :: Cuda.Env.t) :: t
-  @callback __run__(graph :: t, opts :: keyword) :: any
+  @callback __graph__(graph :: t) :: t
+  @callback __run__(graph :: t) :: any
 
   @derive [NodeProto, GraphProto]
   defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: [],
@@ -45,13 +45,13 @@ defmodule Cuda.Graph do
       use Cuda.Graph.Node
       import unquote(__MODULE__), only: unquote(@exports)
       @behaviour unquote(__MODULE__)
-      def __type__(_, _), do: :graph
-      def __proto__(_, _), do: unquote(__MODULE__)
+      def __type__(_assigns), do: :graph
+      def __proto__(), do: unquote(__MODULE__)
 
-      def __run__(graph, opts) do
+      def __run__(graph) do
         Cuda.Graph.Processing.dfs(graph, fn
           :enter, {node, _}, st ->
-            with {:ok, data} <- node.module.__run__(node, opts) do
+            with {:ok, data} <- node.module.__run__(node) do
               {:ok, st}
             end
           _, _, st ->
@@ -59,13 +59,13 @@ defmodule Cuda.Graph do
         end)
       end
 
-      defoverridable __run__: 2, __type__: 2
+      defoverridable __run__: 1, __type__: 1
     end
   end
 
   def add(%__MODULE__{} = graph, id, module, opts \\ [], env \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
-      proto = struct(Node.proto(module, opts, env))
+      proto = struct(Node.proto(module))
       GraphProto.add(graph, Cuda.Graph.Factory.new(proto, id, module, opts, env))
     else
       _ -> compile_error("Graph module #{module} could not be loaded")
@@ -147,13 +147,13 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph do
   """
   def new(_, id, module, opts \\ [], env \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
-      proto = Node.proto(module, opts, env)
+      proto = Node.proto(module)
       graph = %Node{}
               |> Cuda.Graph.Factory.new(id, module, opts, env)
               |> Map.from_struct
       graph = struct(proto, graph)
-      graph = case function_exported?(module, :__graph__, 3) do
-        true -> module.__graph__(graph, opts, env)
+      graph = case function_exported?(module, :__graph__, 1) do
+        true -> module.__graph__(graph)
         _    -> graph
       end
       # graph = graph |> Graph.expand()

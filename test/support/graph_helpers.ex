@@ -15,12 +15,12 @@ defmodule Cuda.Test.GraphHelpers do
     Type is set by using a key :type in options.
     """
     use Node
-    def __pins__(_, _) do
+    def __pins__(_) do
       [input(:input1, :i8), input(:input2, :i8),
        output(:output1, :i8), output(:output2, :i8)]
     end
-    def __type__(opts, _) do
-      Keyword.get(opts, :type, :virtual)
+    def __type__(assigns) do
+      Keyword.get(assigns.options, :type, :virtual)
     end
   end
 
@@ -30,11 +30,11 @@ defmodule Cuda.Test.GraphHelpers do
     Type is set by using a key :type in options.
     """
     use Node
-    def __pins__(_, _) do
+    def __pins__(_) do
       [input(:input, :i8), output(:output, :i8)]
     end
-    def __type__(opts, _) do
-      Keyword.get(opts, :type, :virtual)
+    def __type__(assigns) do
+      Keyword.get(assigns.options, :type, :virtual)
     end
   end
 
@@ -44,11 +44,11 @@ defmodule Cuda.Test.GraphHelpers do
     Type is set by using a key :type in options.
     """
     use Node
-    def __pins__(_, _) do
+    def __pins__(_) do
       [producer(:producer, :i8)]
     end
-    def __type__(opts, _) do
-      Keyword.get(opts, :type, :virtual)
+    def __type__(assigns) do
+      Keyword.get(assigns.options, :type, :virtual)
     end
   end
 
@@ -60,14 +60,14 @@ defmodule Cuda.Test.GraphHelpers do
     {input_pins_number, output_pins_number}
     """
     use Node
-    def __pins__(opts, _) do
-      {i, o} = Keyword.get(opts, :io)
+    def __pins__(assigns) do
+      {i, o} = Keyword.get(assigns.options, :io)
       inputs =  i > 0 && (for x <- 1..i, do: input(String.to_atom("input#{x}"), :i8))   || []
       outputs = o > 0 && (for x <- 1..o, do: output(String.to_atom("output#{x}"), :i8)) || []
       inputs ++ outputs
     end
-    def __type__(opts, _) do
-      Keyword.get(opts, :type, :virtual)
+    def __type__(assigns) do
+      Keyword.get(assigns.options, :type, :virtual)
     end
   end
 
@@ -76,10 +76,10 @@ defmodule Cuda.Test.GraphHelpers do
     Represents a simple graph
     """
     use Graph
-    def __pins__(_, _) do
+    def __pins__(_) do
       [input(:input, :i8), output(:output, :i8)]
     end
-    def __graph__(graph, _, _) do
+    def __graph__(graph) do
       graph
       |> add(:a, Single)
       |> link(:input, {:a, :input})

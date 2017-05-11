@@ -9,8 +9,8 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
 
   defmodule PTXNode do
     use GPUNode
-    def __pins__(_, _), do: [input(:i, :i16), output(:o, :i32)]
-    def __ptx__(opts, _), do: Keyword.get(opts, :ptx)
+    def __pins__(_), do: [input(:i, :i16), output(:o, :i32)]
+    def __ptx__(node), do: Keyword.get(node.assigns.options, :ptx)
   end
 
   defp new_node(ptx) do
@@ -20,7 +20,7 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
   defp gen_ptx(text) do
     node = new_node(text)
     ctx = %{context() | assigns: %{offsets: [i: 0, o: 2]}}
-    [{:ptx, ptx}] = GPUUnit.sources(node, ctx)
+    {:ok, [{:ptx, ptx}]} = GPUUnit.sources(node, ctx)
     parse_ptx(ptx)
   end
 

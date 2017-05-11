@@ -16,14 +16,18 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
       {_, offset, _} = nodes
                        |> Enum.with_index
                        |> Enum.reduce({graph, 0, 0}, &collect_sizes/2)
-      state = {graph, 0, offset, ctx, []}
-      {_, _, _, _, sources} = nodes |> Enum.reduce(state, &collect_sources/2)
-      sources
+      state = {:ok, {graph, 0, offset, ctx, []}}
+      with {:ok, {_, _, _, _, sources}} <- Enum.reduce(nodes, state, &collect_sources/2) do
+        {:ok, sources}
+      else
+        {:error, _} = error -> error
+        error               -> {:error, error}
+      end
     else
-      _ -> []
+      error -> {:error, error}
     end
   end
-  def sources(_, _), do: []
+  def sources(_, _), do: {:ok, []}
 
   defp collect_sizes({node, idx}, {graph, s1, s2}) when div(idx, 2) == 0 do
     node = GraphProto.node(graph, node)
@@ -42,7 +46,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     {graph, Enum.max([s1, size1]), Enum.max([s2, size2])}
   end
 
-  defp collect_sources(node, {graph, offset1, offset2, ctx, sources}) do
+  defp collect_sources(node, {:ok, {graph, offset1, offset2, ctx, sources}}) do
     node = GraphProto.node(graph, node)
     {offsets, _} = node
                    |> NodeProto.pins(input_pin_types())
@@ -51,9 +55,13 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
                    |> NodeProto.pins(output_pin_types())
                    |> Enum.reduce({offsets, offset2}, &collect_offsets/2)
     assigns = Map.put(ctx.assigns, :offsets, offsets)
-    sources = sources ++ GPUUnit.sources(node, %{ctx | assigns: assigns})
-    {graph, offset2, offset1, ctx, sources}
+    with {:ok, node} <- node.module.handle_compile(node),
+         {:ok, src} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
+      sources = sources ++ src
+      {:ok, {graph, offset2, offset1, ctx, sources}}
+    end
   end
+  defp collect_sources(_, error), do: error
 
   defp collect_offsets(pin, {offsets, offset}) do
     {Map.put(offsets, pin.id, offset), offset + Pin.data_size(pin)}
@@ -67,9 +75,10 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   require Logger
 
   def compile(%{type: :computation_graph} = graph, ctx) do
-    sources = GPUUnit.sources(graph, ctx)
     Logger.info("CUDA: Compiling GPU code for graph #{graph.module} (#{graph.id})")
-    with {:ok, cubin} <- Compiler.compile(sources) do
+    with {:ok, graph}   <- graph.module.handle_compile(graph),
+         {:ok, sources} <- GPUUnit.sources(graph, ctx),
+         {:ok, cubin}   <- Compiler.compile(sources) do
       {:ok, NodeProto.assign(graph, :cubin, cubin)}
     else
       _ ->
@@ -80,7 +89,8 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   end
   def compile(%{nodes: nodes} = graph, ctx) do
     Logger.info("CUDA: Compiling graph #{graph.module} (#{graph.id})")
-    with {:ok, _, nodes} <- Enum.reduce(nodes, {:ok, ctx, []}, &compile_reducer/2) do
+    with {:ok, graph}    <- graph.module.handle_compile(graph, ctx),
+         {:ok, _, nodes} <- Enum.reduce(nodes, {:ok, ctx, []}, &compile_reducer/2) do
       {:ok, %{graph | nodes: nodes}}
     else
       _ ->
@@ -101,7 +111,10 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
 end
 
 defimpl Cuda.Compiler.Unit, for: Cuda.Graph.Node do
-  def compile(node, _) do
-    {:ok, node}
+  require Logger
+
+  def compile(node, ctx) do
+    Logger.info("CUDA: Compiling node #{node.module} (#{node.id})")
+    node.module.handle_compile(node, ctx)
   end
 end

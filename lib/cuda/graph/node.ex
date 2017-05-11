@@ -10,11 +10,11 @@ defmodule Cuda.Graph.Node do
   defmodule MyNode do
     use Cuda.Graph.Node
 
-    def __pins__(_opts, _env) do
+    def __pins__(_assigns) do
       [input(:in), output(:out)]
     end
 
-    def __type__(_opts, _env) do
+    def __type__(_assigns) do
       :host
     end
   end
@@ -25,16 +25,20 @@ defmodule Cuda.Graph.Node do
   alias Cuda.Graph
   alias Cuda.Graph.Pin
   alias Cuda.Graph.NodeProto
+  alias Cuda.Compiler.Context
 
   @type type :: :gpu | :host | :virtual | :graph | :computation_graph
   @type options :: keyword
+  @type assigns :: %{options: options, env: Cuda.Env.t}
   @type t :: %__MODULE__{
     id: Graph.id,
     module: module,
     type: type,
     pins: [Pin.t],
-    assigns: map
+    assigns: assigns
   }
+
+  @callback __assigns__(opts :: options, env :: Cuda.Env.t) :: map | keyword
 
   @doc """
   Provides a node protocol that is a structurethat holds node data.
@@ -44,7 +48,7 @@ defmodule Cuda.Graph.Node do
 
   By default it will be `Cuda.Graph.Node`.
   """
-  @callback __proto__(opts :: options, env :: Cuda.Env.t) :: atom
+  @callback __proto__() :: atom
 
   @doc """
   Provides a complete pin list for newly created node.
@@ -52,7 +56,7 @@ defmodule Cuda.Graph.Node do
   You can use `pin/3`, `input/2`, `output/2`, `consumer/2` and `producer/2`
   helpers here.
   """
-  @callback __pins__(opts :: options, env :: Cuda.Env.t) :: [Pin.t]
+  @callback __pins__(assigns :: assigns) :: [Pin.t]
 
   @doc """
   Provides a node type.
@@ -67,7 +71,15 @@ defmodule Cuda.Graph.Node do
   * `:gpu`     - node affects GPU and optionally CPU workflows
   * `:graph`   - node with graph nested in it
   """
-  @callback __type__(opts :: options, env :: Cuda.Env.t) :: type
+  @callback __type__(assigns :: assigns) :: type
+
+  @doc """
+  Called before compilation.
+
+  You can put vars, helpers and other stuff needed by further compilation
+  process.
+  """
+  @callback handle_compile(node :: struct) :: {:ok, struct} | {:error, any}
 
   @derive [NodeProto]
   defstruct [:id, :module, :type, pins: [], assigns: %{}]
@@ -80,9 +92,12 @@ defmodule Cuda.Graph.Node do
   defmacro __using__(_opts) do
     quote do
       import unquote(__MODULE__), only: unquote(@exports)
+      import Cuda.Graph.NodeProto, only: [assign: 3]
       @behaviour unquote(__MODULE__)
-      def __proto__(_opts, _env), do: unquote(__MODULE__)
-      defoverridable __proto__: 2
+      def __assigns__(_opts, _env), do: %{}
+      def __proto__(), do: unquote(__MODULE__)
+      def handle_compile(node), do: {:ok, node}
+      defoverridable __assigns__: 2, __proto__: 0, handle_compile: 1
     end
   end
 
@@ -150,10 +165,10 @@ defmodule Cuda.Graph.Node do
   `Cuda.Graph`, `Cuda.Graph.Node`, `Cuda.Graph.GPUNode` or any other module,
   related to node type.
   """
-  @spec proto(module :: atom, opts :: keyword, env :: Cuda.Env.t) :: atom
-  def proto(module, opts, env) do
-    if function_exported?(module, :__proto__, 2) do
-      module.__proto__(opts, env)
+  @spec proto(module :: atom) :: atom
+  def proto(module) do
+    if function_exported?(module, :__proto__, 0) do
+      module.__proto__()
     else
       __MODULE__
     end
@@ -173,16 +188,22 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
         Cuda.compile_error("Reserved node name '#{id}' used")
       end
 
-      type = case function_exported?(module, :__type__, 2) do
-        true -> module.__type__(opts, env)
+      assigns = case function_exported?(module, :__assigns__, 2) do
+        true -> module.__assigns__(opts, env) |> Enum.into(%{})
+        _    -> %{}
+      end
+      assigns = Map.merge(assigns, %{options: opts, env: env})
+
+      type = case function_exported?(module, :__type__, 1) do
+        true -> module.__type__(assigns)
         _    -> :virtual
       end
       if not type in @types do
         Cuda.compile_error("Unsupported type: #{inspect type}")
       end
 
-      pins = case function_exported?(module, :__pins__, 2) do
-        true -> module.__pins__(opts, env)
+      pins = case function_exported?(module, :__pins__, 1) do
+        true -> module.__pins__(assigns)
         _    -> []
       end
       if not is_list(pins) or not Enum.all?(pins, &valid_pin?/1) do
@@ -190,7 +211,7 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
       end
 
       struct(Cuda.Graph.Node, id: id, module: module, type: type, pins: pins,
-                              assigns: %{options: opts})
+                              assigns: assigns)
     else
       _ -> Cuda.compile_error("Node module #{module} could not be loaded")
     end

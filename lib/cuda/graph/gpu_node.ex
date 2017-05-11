@@ -6,11 +6,11 @@ defmodule Cuda.Graph.GPUNode do
   defmodule MyNode do
     use Cuda.Graph.GPUNode
 
-    def __pins__(_opts, _env) do
+    def __pins__(_assigns) do
       [input(:in), output(:out)]
     end
 
-    def __ptx__(_opts, _ctx) do
+    def __ptx__(_assigns) do
       \"\"\"
       some ptx code
       \"\"\"
@@ -23,7 +23,6 @@ defmodule Cuda.Graph.GPUNode do
   alias Cuda.Node
   alias Cuda.Graph.Pin
   alias Cuda.Graph.NodeProto
-  alias Cuda.Compiler.Context
 
   require Cuda
 
@@ -36,10 +35,8 @@ defmodule Cuda.Graph.GPUNode do
   }
   @type source :: String.t | [String.t] | nil
 
-  @callback __ptx__(opts :: Node.options, ctx :: Context.t) :: source
-  @callback __c__(opts :: Node.options, ctx :: Context.t) :: source
-  @callback __vars__(opts :: Node.options, ctx :: Context.t) :: keyword | map
-  @callback __helpers__(opts :: Node.options, ctx :: Context.t) :: [atom]
+  @callback __ptx__(node :: struct) :: source
+  @callback __c__(node :: struct) :: source
 
   @derive [NodeProto]
   defstruct [:id, :module, :type, pins: [], assigns: %{}]
@@ -48,29 +45,28 @@ defmodule Cuda.Graph.GPUNode do
     quote do
       use Cuda.Graph.Node
       @behaviour unquote(__MODULE__)
-      def __ptx__(_opts, _ctx), do: []
-      def __c__(_opts, _ctx), do: []
-      def __proto__(_opts, _env), do: unquote(__MODULE__)
-      def __type__(_opts, _env), do: :gpu
-      def __vars__(_opts, _ctx), do: %{}
-      def __helpers__(_opts, _ctx), do: []
-      defoverridable __c__: 2, __helpers__: 2, __ptx__: 2, __vars__: 2
+      def __ptx__(_node), do: []
+      def __c__(_node), do: []
+      def __proto__(), do: unquote(__MODULE__)
+      def __type__(_assigns), do: :gpu
+      defoverridable __c__: 1, __ptx__: 1
     end
   end
 end
 
 defimpl Cuda.Graph.Factory, for: Cuda.Graph.GPUNode do
   alias Cuda.Graph.Node
+  alias Cuda.Graph.Factory
 
   @doc """
   Creates a new gpu node
   """
   def new(_, id, module, opts \\ [], env \\ []) do
     node = %Node{}
-           |> Cuda.Graph.Factory.new(id, module, opts, env)
+           |> Factory.new(id, module, opts, env)
            |> Map.from_struct
     module
-    |> Node.proto(opts, env)
+    |> Node.proto()
     |> struct(node)
   end
 end
