@@ -49,7 +49,7 @@ defmodule Cuda.Graph do
       def __proto__(_, _), do: unquote(__MODULE__)
 
       def __run__(graph, opts) do
-        dfs(graph, fn
+        Cuda.Graph.Processing.dfs(graph, fn
           :enter, {node, _}, st ->
             with {:ok, data} <- node.module.__run__(node, opts) do
               {:ok, st}

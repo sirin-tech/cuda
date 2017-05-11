@@ -17,6 +17,7 @@ defmodule Cuda.Graph.ComputationGraph do
               |> Enum.map(fn {node, _pin} -> node end)
               |> Enum.reject(& &1 == gid)
       graph = %{graph | nodes: nodes}
+      graph
     else
       _ -> nil
     end
