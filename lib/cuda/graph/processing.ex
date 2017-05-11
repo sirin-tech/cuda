@@ -18,7 +18,7 @@ defprotocol Cuda.Graph.Processing do
   Finds longest chains of specific node type all over the graph
   """
   @spec longest_chain(graph :: Graph.t, node_type :: Node.type) :: [[Graph.Node.t]]
-  def longest_chain(graph, node_type)
+  def longest_chain(graph, node_type \\ :gpu)
 
   @doc """
   Move node from source graph into destination graph, when destination graph
@@ -26,6 +26,13 @@ defprotocol Cuda.Graph.Processing do
   """
   @spec move(source_graph :: t, destination_graph :: t, node_id :: term) :: t
   def move(srcg, _dstg, nid)
+
+  @doc """
+  Finds all longest chains of specific type nodes and wrap each of them into
+  computation graphs
+  """
+  @spec precompile_wrap(graph :: Cuda.Graph.t, node_type :: Cuda.Graph.Node.type) :: Cuda.Graph.t
+  def precompile_wrap(graph, node_type \\ :gpu)
 end
 
 defimpl Cuda.Graph.Processing, for: Cuda.Graph do
@@ -283,7 +290,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # ----------------------------------------------------------------------------
   # longest_chain
   # ----------------------------------------------------------------------------
-  def longest_chain(graph, node_type) do
+  def longest_chain(graph, node_type \\ :gpu) do
     lchain = graph
     |> expand
     |> NodeProto.pins(input_pin_types())
@@ -537,5 +544,23 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     mv_shared_links(srcg, dstg, node, rest)
   end
 
-  #precompile_wrap source_graph
+  #-----------------------------------------------------------------------------
+  #precompile_wrap
+  #-----------------------------------------------------------------------------
+  def precompile_wrap(graph, node_type \\ :gpu) do
+    Code.ensure_loaded(Graph.ComputationGraph)
+    chains = graph
+    |> longest_chain(node_type)
+    |> Cuda.Test.GraphHelpers.nodes2ids()
+    prc_wrap(graph, chains)
+  end
+  defp prc_wrap(graph, []), do: graph
+  defp prc_wrap(graph, [chain | rest]) do
+    nested_id = "comp_" <> UUID.uuid1()
+    nested = Graph.Factory.new(%Cuda.Graph{}, nested_id, Graph.ComputationGraph, [], [])
+    graph
+    |> GraphProto.add(nested)
+    |> move(nested_id, chain)
+    |> prc_wrap(rest)
+  end
 end
