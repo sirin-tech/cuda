@@ -264,6 +264,20 @@ defmodule Cuda.Test.GraphHelpers do
     |> link({:a, :output}, :o1)
     |> link({:c, :output}, :o2)
   end
+  # [i1]──▶[input (a) output]──▶[input (b) output]──▶[input (c) output]──▶[o1]
+  def graph(:i1_single3_o1) do
+    graph(id: :graph,
+          pins: [
+            %Pin{id: :i1, type: :input, data_type: :i8},
+            %Pin{id: :o1, type: :output, data_type: :i8}])
+    |> add(:a, Single)
+    |> add(:b, Single)
+    |> add(:c, Single)
+    |> link(:i1, {:a, :input})
+    |> link({:a, :output}, {:b, :input})
+    |> link({:b, :output}, {:c, :input})
+    |> link({:c, :output}, :o1)
+  end
   def graph(:longest_chain_test) do
     graph(id: :graph,
           pins: [
@@ -313,6 +327,18 @@ defmodule Cuda.Test.GraphHelpers do
   end
 
   @doc """
+  Adds nested computation graph to predefined graph
+  """
+  @spec nested_graph(predefined_graph_name :: atom, nested_graph_name :: atom) :: Cuda.Graph.t
+  def nested_graph(predefined, nested \\ :nested) do
+    Code.ensure_loaded(Graph.ComputationGraph)
+    nested = Graph.Factory.new(%Cuda.Graph{}, nested, Graph.ComputationGraph, [], [])
+    predefined
+    |> graph()
+    |> Graph.GraphProto.add(nested)
+  end
+
+  @doc """
   Converts nodes to it's ids
   """
   @spec nodes2ids([Cuda.Graph.Node.t]) :: [term]
@@ -324,22 +350,29 @@ defmodule Cuda.Test.GraphHelpers do
     [val.id | nodes2ids(rest)]
   end
 
+  @doc """
+  Checks connection and order of connection between two nodes, before it expands the graph
+  """
+  @spec connected?(Cuda.Graph.t, current_node_id :: atom, next_node_id :: atom) :: boolean
   def connected?(graph, current_node_id, next_node_id) do
     graph = Cuda.Graph.Processing.expand(graph)
     graph.links
-    |> Enum.any?(fn
-      {{^current_node_id, _}, {^next_node_id, _}} -> true
+    |> Enum.any?(fn {{cnode_id, _}, {nnode_id, _}} ->
+      cnid = if is_tuple(cnode_id) do
+        cnode_id
+        |> Tuple.to_list()
+        |> List.last()
+      else
+        cnode_id
+      end
+      nnid = if is_tuple(nnode_id) do
+        nnode_id
+        |> Tuple.to_list()
+        |> List.last()
+      else
+        nnode_id
+      end
+      cnid == current_node_id and nnid == next_node_id
     end)
-  end
-
-  # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
-  #                            └─▶[input (c) output]───────────────────────▶[o2]
-  def tst_mv_graph() do
-    # b
-    Code.ensure_loaded(Graph.ComputationGraph)
-    nested = Graph.Factory.new(%Cuda.Graph{}, :cmpgraph, Graph.ComputationGraph, [], [])
-    :i1_single4_o2
-    |> graph()
-    |> Graph.GraphProto.add(nested)
   end
 end
