@@ -20,7 +20,7 @@ defmodule Cuda.Graph do
     pins: [Pin.t],
     nodes: [Node.t],
     links: [{link, link}],
-    options: Node.options
+    assigns: map
   }
 
   @type dfs_action :: :enter | :move | :leave
@@ -28,10 +28,11 @@ defmodule Cuda.Graph do
   @type dfs_callback :: (action :: dfs_action, arg :: any, state :: any -> dfs_result)
 
   @callback __graph__(graph :: t, opts :: Node.options, env :: Cuda.Env.t) :: t
+  @callback __run__(graph :: t, opts :: keyword) :: any
 
   @derive [NodeProto, GraphProto]
   defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: [],
-             options: []]
+             assigns: %{}]
 
   @self :__self__
   @input_pins  ~w(input consumer)a
@@ -46,7 +47,19 @@ defmodule Cuda.Graph do
       @behaviour unquote(__MODULE__)
       def __type__(_, _), do: :graph
       def __proto__(_, _), do: unquote(__MODULE__)
-      defoverridable __type__: 2
+
+      def __run__(graph, opts) do
+        Cuda.Graph.Processing.dfs(graph, fn
+          :enter, {node, _}, st ->
+            with {:ok, data} <- node.module.__run__(node, opts) do
+              {:ok, st}
+            end
+          _, _, st ->
+            {:ok, st}
+        end)
+      end
+
+      defoverridable __run__: 2, __type__: 2
     end
   end
 

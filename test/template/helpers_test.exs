@@ -12,7 +12,7 @@ defmodule Cuda.Template.HelpersTest do
 
   describe "var/2" do
     test "Get variable from context" do
-      ctx = %Context{var: %{var: 16}}
+      ctx = %Context{vars: %{var: 16}}
       assert 16 == var(ctx, :var)
     end
   end

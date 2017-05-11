@@ -19,7 +19,7 @@ defmodule Cuda.Compiler.ComputationGraphTest do
 
   describe "sources/2" do
     test "returns chained sources" do
-      ctx = context(var: %{x: 10})
+      ctx = context(vars: %{x: 10})
       graph_pins = [%Cuda.Graph.Pin{id: :gi, type: :input, data_type: :i16},
                     %Cuda.Graph.Pin{id: :go, type: :output, data_type: :i64}]
       graph = Cuda.Graph.Factory.new(%Cuda.Graph{}, :g, Cuda.Graph.ComputationGraph, [], env())

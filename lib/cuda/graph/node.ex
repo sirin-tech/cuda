@@ -33,7 +33,7 @@ defmodule Cuda.Graph.Node do
     module: module,
     type: type,
     pins: [Pin.t],
-    options: options
+    assigns: map
   }
 
   @doc """
@@ -70,7 +70,7 @@ defmodule Cuda.Graph.Node do
   @callback __type__(opts :: options, env :: Cuda.Env.t) :: type
 
   @derive [NodeProto]
-  defstruct [:id, :module, :type, pins: [], options: []]
+  defstruct [:id, :module, :type, pins: [], assigns: %{}]
 
   @exports [consumer: 2, input: 2, output: 2, pin: 3, producer: 2]
   @input_pins  ~w(input consumer)a
@@ -186,11 +186,11 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
         _    -> []
       end
       if not is_list(pins) or not Enum.all?(pins, &valid_pin?/1) do
-        Cuda.compile_error("Invalid connector list supploed")
+        Cuda.compile_error("Invalid pin list supplied")
       end
 
       struct(Cuda.Graph.Node, id: id, module: module, type: type, pins: pins,
-                              options: opts)
+                              assigns: %{options: opts})
     else
       _ -> Cuda.compile_error("Node module #{module} could not be loaded")
     end

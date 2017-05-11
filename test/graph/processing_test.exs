@@ -2,7 +2,7 @@ defmodule Cuda.Graph.ProcessingTest do
   use ExUnit.Case
   alias Cuda.Graph.Processing
   alias Cuda.Graph.GraphProto, as: GProto
-  alias Cuda.Graph.NodeProto,  as: NProto
+  # alias Cuda.Graph.NodeProto,  as: NProto
 
   import Cuda.Test.GraphHelpers
   import Processing

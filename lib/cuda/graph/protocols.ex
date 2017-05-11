@@ -14,6 +14,9 @@ defprotocol Cuda.Graph.NodeProto do
   """
   @spec pins(node :: Node.t, type :: Pin.type | [Pin.type]) :: [Pin.t]
   def pins(node, type \\ nil)
+
+  @spec assign(node :: struct, key :: atom, value :: any) :: struct
+  def assign(node, key, value)
 end
 
 defprotocol Cuda.Graph.GraphProto do
@@ -53,6 +56,10 @@ defimpl Cuda.Graph.NodeProto, for: Any do
       %Pin{type: ^type} -> true
       _                 -> false
     end)
+  end
+
+  def assign(%{assigns: assigns} = node, key, value) do
+    %{node | assigns: Map.put(assigns, key, value)}
   end
 end
 

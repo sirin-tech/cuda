@@ -5,7 +5,9 @@ defmodule Cuda.Compiler.Context do
 
   @type t :: %__MODULE__{
     env: Cuda.Env.t,
-    var: map}
+    vars: map,
+    assigns: map,
+    node: map}
 
-  defstruct [:env, :var]
+  defstruct [:env, vars: %{}, assigns: %{}, node: %{}]
 end
