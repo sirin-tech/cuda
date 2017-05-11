@@ -4,6 +4,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   alias Cuda.Graph.NodeProto
   alias Cuda.Graph.GraphProto
   alias Cuda.Graph.Processing
+  alias Cuda.Compiler.GPUUnit
 
   import Node, only: [input_pin_types: 0, output_pin_types: 0]
 
@@ -49,12 +50,58 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     {offsets, _} = node
                    |> NodeProto.pins(output_pin_types())
                    |> Enum.reduce({offsets, offset2}, &collect_offsets/2)
-    var = Map.put(ctx.var, :offsets, offsets)
-    sources = sources ++ Cuda.Compiler.GPUUnit.sources(node, %{ctx | var: var})
+    assigns = Map.put(ctx.assigns, :offsets, offsets)
+    sources = sources ++ GPUUnit.sources(node, %{ctx | assigns: assigns})
     {graph, offset2, offset1, ctx, sources}
   end
 
   defp collect_offsets(pin, {offsets, offset}) do
     {Map.put(offsets, pin.id, offset), offset + Pin.data_size(pin)}
+  end
+end
+
+defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
+  alias Cuda.Compiler
+  alias Cuda.Compiler.GPUUnit
+  alias Cuda.Graph.NodeProto
+  require Logger
+
+  def compile(%{type: :computation_graph} = graph, ctx) do
+    sources = GPUUnit.sources(graph, ctx)
+    Logger.info("CUDA: Compiling GPU code for graph #{graph.module} (#{graph.id})")
+    with {:ok, cubin} <- Compiler.compile(sources) do
+      {:ok, NodeProto.assign(graph, :cubin, cubin)}
+    else
+      _ ->
+        Logger.warn("CUDA: Error while compiling GPU code for graph " <>
+                    "#{graph.module} (#{graph.id})")
+        {:error, :compile_error}
+    end
+  end
+  def compile(%{nodes: nodes} = graph, ctx) do
+    Logger.info("CUDA: Compiling graph #{graph.module} (#{graph.id})")
+    with {:ok, _, nodes} <- Enum.reduce(nodes, {:ok, ctx, []}, &compile_reducer/2) do
+      {:ok, %{graph | nodes: nodes}}
+    else
+      _ ->
+        Logger.warn("CUDA: Error while compiling graph " <>
+                    "#{graph.module} (#{graph.id})")
+        {:error, :compile_error}
+    end
+  end
+
+  defp compile_reducer(node, {:ok, ctx, nodes}) do
+    with {:ok, node} <- Cuda.Compiler.Unit.compile(node, ctx) do
+      {:ok, ctx, [node | nodes]}
+    end
+  end
+  defp compile_reducer(_, error) do
+    error
+  end
+end
+
+defimpl Cuda.Compiler.Unit, for: Cuda.Graph.Node do
+  def compile(node, _) do
+    {:ok, node}
   end
 end

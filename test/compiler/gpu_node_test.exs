@@ -27,21 +27,21 @@ defmodule Cuda.Compiler.GPUNodeTest do
 
   describe "sources/2" do
     test "returns ptx sources" do
-      ctx = context(var: %{x: 10})
+      ctx = context(vars: %{x: 10})
       node = Factory.new(%Cuda.Graph.GPUNode{}, :node, PTXNode, [], env())
       sources = GPUUnit.sources(node, ctx)
       assert sources == [{:ptx, "PTX-10"}]
     end
 
     test "returns c sources" do
-      ctx = context(var: %{x: 20})
+      ctx = context(vars: %{x: 20})
       node = Factory.new(%Cuda.Graph.GPUNode{}, :node, CNode, [], env())
       sources = GPUUnit.sources(node, ctx)
       assert sources == [{:c, "C-20"}]
     end
 
     test "returns both c and ptx sources" do
-      ctx = context(var: %{x: 10, y: 20})
+      ctx = context(vars: %{x: 10, y: 20})
       node = Factory.new(%Cuda.Graph.GPUNode{}, :node, PTXCNode, [], env())
       sources = GPUUnit.sources(node, ctx)
       assert sources == [{:ptx, "PTX-10"}, {:c, "C-20"}]

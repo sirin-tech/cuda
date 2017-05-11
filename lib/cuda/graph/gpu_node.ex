@@ -32,15 +32,17 @@ defmodule Cuda.Graph.GPUNode do
     module: module,
     type: Node.type,
     pins: [Pin.t],
-    options: Node.options
+    assigns: map
   }
   @type source :: String.t | [String.t] | nil
 
   @callback __ptx__(opts :: Node.options, ctx :: Context.t) :: source
   @callback __c__(opts :: Node.options, ctx :: Context.t) :: source
+  @callback __vars__(opts :: Node.options, ctx :: Context.t) :: keyword | map
+  @callback __helpers__(opts :: Node.options, ctx :: Context.t) :: [atom]
 
   @derive [NodeProto]
-  defstruct [:id, :module, :type, pins: [], options: []]
+  defstruct [:id, :module, :type, pins: [], assigns: %{}]
 
   defmacro __using__(_opts) do
     quote do
@@ -50,7 +52,9 @@ defmodule Cuda.Graph.GPUNode do
       def __c__(_opts, _ctx), do: []
       def __proto__(_opts, _env), do: unquote(__MODULE__)
       def __type__(_opts, _env), do: :gpu
-      defoverridable __c__: 2, __ptx__: 2
+      def __vars__(_opts, _ctx), do: %{}
+      def __helpers__(_opts, _ctx), do: []
+      defoverridable __c__: 2, __helpers__: 2, __ptx__: 2, __vars__: 2
     end
   end
 end

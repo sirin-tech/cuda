@@ -50,8 +50,9 @@ defmodule Cuda.Template do
   end
 
   defp eval(template, context, helpers) do
-    func = get_funcs(helpers)
-    EEx.eval_string(template, [ctx: context], [functions: func])
+    opts = [functions: get_funcs(helpers),
+            macros: get_macros(helpers)]
+    EEx.eval_string(template, [ctx: context], opts)
   end
 
   defp get_funcs([]), do: []
@@ -62,5 +63,15 @@ defmodule Cuda.Template do
   defp get_funcs(module) do
     funcs = module.__info__(:functions)
     {:ok, {module, funcs}}
+  end
+
+  defp get_macros([]), do: []
+  defp get_macros([module | rest]) do
+    {:ok, macros} = get_macros(module)
+    [macros | get_macros(rest)]
+  end
+  defp get_macros(module) do
+    macros = module.__info__(:macros)
+    {:ok, {module, macros}}
   end
 end

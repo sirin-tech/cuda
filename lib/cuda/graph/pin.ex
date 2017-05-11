@@ -32,7 +32,7 @@ defmodule Cuda.Graph.Pin do
   defp type_size(:f16), do: 2
   defp type_size(:f32), do: 4
   defp type_size(:f64), do: 8
-  defp type_size(type) when is_atom(type) do
+  defp type_size(type) when is_atom(type) or is_bitstring(type) do
     case Regex.run(@type_re, "#{type}", capture: :all_but_first) do
       [n] -> div(String.to_integer(n), 8)
       _   -> 0
