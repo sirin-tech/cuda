@@ -75,6 +75,7 @@ defmodule Cuda.Graph.Node do
   @exports [consumer: 2, input: 2, output: 2, pin: 3, producer: 2]
   @input_pins  ~w(input consumer)a
   @output_pins ~w(output producer)a
+  @graph_types ~w(graph computation_graph)a
 
   defmacro __using__(_opts) do
     quote do
@@ -91,6 +92,10 @@ defmodule Cuda.Graph.Node do
 
   defmacro output_pin_types() do
     quote(do: unquote(@output_pins))
+  end
+
+  defmacro graph_types() do
+    quote(do: unquote(@graph_types))
   end
 
   @doc """

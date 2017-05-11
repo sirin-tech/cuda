@@ -31,14 +31,13 @@ end
 defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   alias Cuda.Graph
   alias Cuda.Graph.Pin
+  alias Cuda.Graph.Node
   alias Cuda.Graph.NodeProto
   alias Cuda.Graph.GraphProto
 
   require Cuda
   import Cuda, only: [compile_error: 1]
-
-  @input_pins  ~w(input consumer)a
-  @output_pins ~w(output producer)a
+  import Node, only: [graph_types: 0, input_pin_types: 0, output_pin_types: 0]
 
   # ----------------------------------------------------------------------------
   # dfs
@@ -48,7 +47,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     st = %{graph: graph, nodes: [], callback: callback, state: state}
     result =
       graph
-      |> NodeProto.pins(@input_pins)
+      |> NodeProto.pins(input_pin_types())
       |> Enum.reduce({:ok, st}, fn
         %Pin{id: id}, {:ok, st} -> dfs_search({:__self__, id}, {:ok, st})
         _, result               -> result
@@ -119,7 +118,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       nil ->
         []
       node ->
-        @output_pins
+        output_pin_types()
         |> Enum.flat_map(& NodeProto.pins(node, &1))
         |> Enum.map(& {node_id, &1.id})
     end
@@ -149,7 +148,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   def loop?(graph) do
     result = dfs(graph, fn
       # graph input visited - reset chain
-      :enter, {%Graph{}, %{type: type}}, _ when type in @input_pins ->
+      :enter, {%Graph{}, %{type: type}}, _ when type in input_pin_types() ->
         {:ok, MapSet.new()}
       # graph output visited - skip
       :enter, {%Graph{}, _}, chain ->
@@ -189,7 +188,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # ----------------------------------------------------------------------------
   def expand(%{nodes: nodes, links: links} = graph) do
     {nodes, links} = Enum.flat_map_reduce(nodes, links, fn
-      %{id: child_id, type: :graph} = child, links ->
+      %{id: child_id, type: type} = child, links when type in graph_types() ->
         child = child
                 |> expand()
         nodes = child.nodes
@@ -287,7 +286,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   def longest_chain(graph, node_type) do
     lchain = graph
     |> expand
-    |> NodeProto.pins(@input_pins)
+    |> NodeProto.pins(input_pin_types())
     |> lc_producer_pins(graph)
     |> Enum.reduce([], fn link_part, acc ->
       case lc_link(graph, link_part) do
@@ -377,7 +376,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   defp lc_check_inputs?(nil, _, _), do: true
   defp lc_check_inputs?(%{id: pid}, %{id: cid} = cnode, %{links: links}) do
     inpins = cnode
-    |> NodeProto.pins(@input_pins)
+    |> NodeProto.pins(input_pin_types())
     |> length()
     links
     |> Enum.filter(fn
@@ -410,7 +409,24 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     %{srcg | nodes: nodes}
   end
   def move(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
-    shrdlinks = mv_shared_links(srcg.links, nid, dstg_id)
+    {srcg, dstg} = mv_shared_links(srcg, dstg, node)
+    {dictpins, dstg} = dstg
+    |> mv_copy_pins(mv_pins_to_copy(srcg, dstg, node))
+    srcg = mv_links_redirect(srcg, dstg_id, nid, dictpins)
+    srcg = %{srcg | nodes: List.delete(srcg.nodes, node)}
+    dstg = mv_add_node(dstg, node, dictpins)
+    nodes = Enum.map(srcg.nodes, fn
+      %{id: ^dstg_id} -> dstg
+      node            -> node
+    end)
+    %{srcg | nodes: nodes}
+  end
+  def move(srcg, _, []), do: srcg
+  def move(srcg, dstg_id, [node_id | rest]) do
+    dstg = mv_get_node(srcg, dstg_id)
+    node = mv_get_node(srcg, node_id)
+    srcg = move(srcg, dstg, node)
+    move(srcg, dstg_id, rest)
   end
   def move(srcg, dstg_id, node_id) do
     dstg = mv_get_node(srcg, dstg_id)
@@ -431,8 +447,8 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> Enum.reduce(graph.links, fn {npid, gpid}, links ->
       %{type: type} = NodeProto.pin(node, npid)
       newlink = cond do
-        Enum.member?(@input_pins, type)  -> {{:__self__, gpid}, {nid, npid}}
-        Enum.member?(@output_pins, type) -> {{nid, npid}, {:__self__, gpid}}
+        Enum.member?(input_pin_types(), type)  -> {{:__self__, gpid}, {nid, npid}}
+        Enum.member?(output_pin_types(), type) -> {{nid, npid}, {:__self__, gpid}}
       end
       [newlink | links]
     end)
@@ -440,30 +456,14 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   end
 
   defp mv_links_redirect(srcg, dstg_id, node_id, dict) do
-    links = Enum.map(srcg.links, fn
-      {{^node_id, pid}, other} -> {{dstg_id, dict[pid]}, other}
-      {other, {^node_id, pid}} -> {other, {dstg_id, dict[pid]}}
-      link                     -> link
+    links = Enum.reduce(srcg.links, [], fn
+      {{^node_id, _}, {^dstg_id, _}}, acc -> acc
+      {{^dstg_id, _}, {^node_id, _}}, acc -> acc
+      {{^node_id, pid}, other}, acc       -> [{{dstg_id, dict[pid]}, other} | acc]
+      {other, {^node_id, pid}}, acc       -> [{other, {dstg_id, dict[pid]}} | acc]
+      link, acc                           -> [link | acc]
     end)
     %{srcg | links: links}
-  end
-
-  defp mv_shared_links(links, nid1, nid2) do
-    links
-    |> Enum.filter(fn
-      {{^nid1, _}, {^nid2, _}} -> true
-      {{^nid2, _}, {^nid1, _}} -> true
-      _                        -> false
-    end)
-  end
-
-  defp mv_shared_pins(links, trgtid, nghbrid) do
-    links
-    |> Enum.reduce([], fn
-      {{^trgtid, pid}, {^nghbrid, _}}, acc -> [pid | acc]
-      {{^nghbrid, _}, {^trgtid, pid}}, acc -> [pid | acc]
-      _, acc                               -> acc
-    end)
   end
 
   defp mv_copy_pins(graph, pins) do
@@ -476,4 +476,66 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       {dict, graph}
     end)
   end
+
+  defp mv_pins_to_copy(srcg, %{id: dstg_id}, %{id: nid} = node) do
+    srcg.links
+    |> Enum.reduce([], fn
+      {{^nid, _}, {^dstg_id, _}}, acc -> acc
+      {{^dstg_id, _}, {^nid, _}}, acc -> acc
+      {{^nid, pnid}, _}, acc          -> [NodeProto.pin(node, pnid) | acc]
+      {_, {^nid, pnid}}, acc          -> [NodeProto.pin(node, pnid) | acc]
+      _, acc                       -> acc
+    end)
+  end
+
+  defp mv_shared_links(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
+    shrlinks = srcg.links
+    |> Enum.filter(fn
+      {{^nid, _}, {^dstg_id, _}} -> true
+      {{^dstg_id, _}, {^nid, _}} -> true
+      _                          -> false
+    end)
+    mv_shared_links(srcg, dstg, node, shrlinks)
+  end
+  defp mv_shared_links(srcg, dstg, _, []), do: {srcg, dstg}
+  defp mv_shared_links(srcg, %{id: dstg_id} = dstg, node, [{{nid, npid}, {did, dpid}} = link | rest]) when did == dstg_id do
+    pin = NodeProto.pin(dstg, dpid)
+    dstg = %{dstg | links: dstg.links
+    |> Enum.map(fn
+      {{:__self__, ^dpid}, rest} -> {{nid, npid}, rest}
+      link                           -> link
+    end)}
+    dstg = %{dstg | pins: List.delete(dstg.pins, pin)}
+    srcg = %{srcg | links: List.delete(srcg.links, link)}
+    mv_shared_links(srcg, dstg, node, rest)
+  end
+  defp mv_shared_links(srcg, %{id: dstg_id} = dstg, node, [{{did, dpid}, {nid, npid}} = link | rest]) when did == dstg_id do
+    pin = NodeProto.pin(dstg, dpid)
+    count = srcg.links
+    |> Enum.filter(fn
+      {{^dstg_id, ^dpid}, _} -> true
+      _                      -> false
+    end)
+    |> length()
+
+    dstg = if count == 1 do
+      tmp = %{dstg | links: dstg.links
+      |> Enum.map(fn
+        {other, {:__self__, ^dpid}} -> {other, {nid, npid}}
+        link                        -> link
+      end)}
+      %{tmp | pins: List.delete(tmp.pins, pin)}
+    else
+      {other, _} = Enum.find(dstg.links, fn
+        {_, {:__self__, ^dpid}} -> true
+        _                       -> false
+      end)
+      %{dstg | links: [{other, {nid, npid}} | dstg.links]}
+    end
+
+    srcg = %{srcg | links: List.delete(srcg.links, link)}
+    mv_shared_links(srcg, dstg, node, rest)
+  end
+
+  #precompile_wrap source_graph
 end

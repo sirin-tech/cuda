@@ -1,6 +1,8 @@
 defmodule Cuda.Graph.ProcessingTest do
   use ExUnit.Case
   alias Cuda.Graph.Processing
+  alias Cuda.Graph.GraphProto, as: GProto
+  alias Cuda.Graph.NodeProto,  as: NProto
 
   import Cuda.Test.GraphHelpers
   import Processing
@@ -206,6 +208,93 @@ defmodule Cuda.Graph.ProcessingTest do
     test "raises on unconnected pins" do
       # [i]──▶[input (a) output]─x─▶[o]
       assert_raise(CompileError, fn -> longest_chain(graph(:unconnected), :virtual) end)
+    end
+  end
+
+  describe "move/3" do
+    test "node moved into empty nested graph" do
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      graph = nested_graph(:i1_single4_o2)
+      graph = move(graph, :nested, :b)
+      assert graph |> GProto.node(:nested) |> GProto.node(:b) != nil
+    end
+
+    test "pins of the moved node are copied into nested graph" do
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      graph = nested_graph(:i1_single4_o2)
+      b = GProto.node(graph, :b)
+      graph = move(graph, :nested, :b)
+      nested = GProto.node(graph, :nested)
+      assert length(b.pins) == length(nested.pins)
+    end
+
+    test "checks connection between moved node and its neighbours" do
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      graph = nested_graph(:i1_single4_o2)
+      graph = move(graph, :nested, :b)
+      assert connected?(graph, :a, :b)
+      assert connected?(graph, :b, :d)
+    end
+
+    test "when two nodes have shared link, the first already in nested graph, and the second moves there, shared pin of nested graph will be removed" do
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      graph = nested_graph(:i1_single4_o2)
+      graph = move(graph, :nested, :d)
+      old_pin = graph |> GProto.node(:nested)
+      old_pin = old_pin.pins |> Enum.find(&(&1.type == :input))
+      graph = move(graph, :nested, :b)
+      new_pin = graph |> GProto.node(:nested)
+      new_pin = new_pin.pins |> Enum.find(&(&1.type == :input))
+      assert old_pin.id != new_pin.id
+      graph = nested_graph(:i1_single4_o2)
+      graph = move(graph, :nested, :b)
+      old_pin = graph |> GProto.node(:nested)
+      old_pin = old_pin.pins |> Enum.find(&(&1.type == :output))
+      graph = move(graph, :nested, :d)
+      new_pin = graph |> GProto.node(:nested)
+      new_pin = new_pin.pins |> Enum.find(&(&1.type == :output))
+      assert old_pin.id != new_pin.id
+    end
+
+    test "when two nodes have shared link, the first already in nested graph, and the second moves there, they have direct shared link into nested graph" do
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      graph = nested_graph(:i1_single4_o2)
+      graph = graph
+      |> move(:nested, :d)
+      |> move(:nested, :b)
+      n = GProto.node(graph, :nested)
+      assert Enum.any?(n.links, fn
+        {{:b, _}, {:d, _}} -> true
+        _                  -> false
+      end)
+    end
+
+    test "save nested graph pin when more than one node connected to it, and one of it moved to nested graph" do
+      # [i1]──▶[input (a) output]──┬──[input (b) output]──▶[input (d) output]──▶[o1]
+      #                            └─▶[input (c) output]───────────────────────▶[o2]
+      graph = nested_graph(:i1_single4_o2)
+      graph = move(graph, :nested, :a)
+      pin = graph |> GProto.node(:nested)
+      pin = pin.pins |> Enum.find(&(&1.type == :output))
+      graph = move(graph, :nested, :b)
+      n = graph |> GProto.node(:nested)
+      n = n.pins
+      assert Enum.any?(n, &(&1.id == pin.id))
+    end
+
+    test "general test" do
+      # [i1]──▶[input (a) output]──▶[input (b) output]──▶[input (c) output]──▶[o1]
+      graph = nested_graph(:i1_single3_o1)
+      graph = move(graph, :nested, [:a, :b, :c])
+      n = GProto.node(graph, :nested)
+      assert Enum.any?(n.nodes, &(&1.id == :a))
+      assert Enum.any?(n.nodes, &(&1.id == :b))
+      assert Enum.any?(n.nodes, &(&1.id == :c))
     end
   end
 end
