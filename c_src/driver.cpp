@@ -45,6 +45,7 @@ int Driver::LoadModule(std::string cubin, LinkerOptions &options) {
   if (result != CUDA_SUCCESS) throw DriverError(result);
   int moduleNo = modules.size() + 1;
   modules.insert(std::pair<int, CUmodule>(moduleNo, module));
+  DEBUG("Load module: " << result);
   return moduleNo;
 }
 
@@ -228,7 +229,6 @@ Linker::Linker(LinkerOptions &options) {
     optKeys.push_back(CU_JIT_LOG_VERBOSE);
     optValues.push_back((void *)&options.verbose);
   }
-  initialized = true;
   DEBUG("Linker initialized");
 }
 
@@ -243,27 +243,27 @@ Linker::~Linker() {
 }
 
 size_t Linker::OptionsSize() {
-  if (!initialized) throw StringError("Unintialized linker used");
+  // if (!initialized) throw StringError("Unintialized linker used");
   return optKeys.size();
 }
 
 CUjit_option *Linker::OptionsKeys() {
-  if (!initialized) throw StringError("Unintialized linker used");
+  // if (!initialized) throw StringError("Unintialized linker used");
   return optKeys.data();
 }
 
 void **Linker::OptionsValues() {
-  if (!initialized) throw StringError("Unintialized linker used");
+  // if (!initialized) throw StringError("Unintialized linker used");
   return optValues.data();
 }
 
 void Linker::Run(std::list<std::string> sources) {
-  if (!initialized) throw StringError("Unintialized linker used");
-
+  // if (!initialized) throw StringError("Unintialized linker used");
   CUresult result;
 
   result = cuLinkCreate(optKeys.size(), optKeys.data(), optValues.data(), &state);
   if (result != CUDA_SUCCESS) throw DriverError(result);
+  initialized = true;
 
   for (auto it = std::begin(sources); it != std::end(sources); ++it) {
     result = cuLinkAddData(state, CU_JIT_INPUT_PTX, (void *)it->c_str(), it->size() + 1, 0, 0, 0, 0);

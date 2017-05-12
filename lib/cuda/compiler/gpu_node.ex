@@ -1,5 +1,6 @@
 defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
   alias Cuda.Template
+  alias Cuda.Graph.NodeProto
 
   defmodule Helpers do
     use Bitwise
@@ -14,6 +15,21 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
       ".visible .entry #{ctx.node.id}__#{name} (#{params}) {\n" <>
       body <>
       "\n}"
+    end
+
+    def include(ctx, module, part \\ :body, opts \\ []) do
+      {part, opts} = case part do
+        opts when is_list(opts) -> {:body, opts}
+        part                    -> {part, opts}
+      end
+      with {:module, _} <- Code.ensure_loaded(module) do
+        case function_exported?(module, :__ptx__, 2) do
+          true -> module.__ptx__(part, Keyword.put(opts, :ctx, ctx))
+          _    -> ""
+        end
+      else
+        _ -> raise CompileError, description: "Couldn't compile include module #{module}"
+      end
     end
 
     def param({name, type, opts}) do
@@ -79,7 +95,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
   def sources(node, ctx) do
     vars = Map.get(node.assigns, :vars, %{}) |> Enum.into(%{})
     helpers = [Helpers] ++ Map.get(node.assigns, :helpers, [])
-    opts = [context: %{ctx | node: node}, helpers: helpers, vars: vars]
+    opts = [context: %{ctx | node: node, vars: vars}, helpers: helpers]
     ptx = case node.module.__ptx__(node) do
       src when is_bitstring(src) -> [src]
       src when is_list(src)      -> src
@@ -92,7 +108,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
       _                          -> []
     end
     c = c |> Enum.map(& Template.c_preprocess(&1, opts))
-    {:ok, ptx ++ c}
+    {:ok, NodeProto.assign(node, :sources, ptx ++ c)}
   end
 end
 
@@ -104,9 +120,9 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
 
   def compile(node, ctx) do
     Logger.info("CUDA: Compiling GPU code for node #{node.module} (#{node.id})")
-    with {:ok, node}    <- node.module.handle_compile(node),
-         {:ok, sources} <- GPUUnit.sources(node, ctx),
-         {:ok, cubin}   <- Compiler.compile(sources) do
+    with {:ok, node}  <- node.module.__compile__(node),
+         {:ok, node}  <- GPUUnit.sources(node, ctx),
+         {:ok, cubin} <- Compiler.compile(node.assigns.sources) do
       {:ok, NodeProto.assign(node, :cubin, cubin)}
     else
       _ ->

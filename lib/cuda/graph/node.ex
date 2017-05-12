@@ -25,7 +25,6 @@ defmodule Cuda.Graph.Node do
   alias Cuda.Graph
   alias Cuda.Graph.Pin
   alias Cuda.Graph.NodeProto
-  alias Cuda.Compiler.Context
 
   @type type :: :gpu | :host | :virtual | :graph | :computation_graph
   @type options :: keyword
@@ -79,7 +78,7 @@ defmodule Cuda.Graph.Node do
   You can put vars, helpers and other stuff needed by further compilation
   process.
   """
-  @callback handle_compile(node :: struct) :: {:ok, struct} | {:error, any}
+  @callback __compile__(node :: struct) :: {:ok, struct} | {:error, any}
 
   @derive [NodeProto]
   defstruct [:id, :module, :type, pins: [], assigns: %{}]
@@ -96,8 +95,8 @@ defmodule Cuda.Graph.Node do
       @behaviour unquote(__MODULE__)
       def __assigns__(_opts, _env), do: %{}
       def __proto__(), do: unquote(__MODULE__)
-      def handle_compile(node), do: {:ok, node}
-      defoverridable __assigns__: 2, __proto__: 0, handle_compile: 1
+      def __compile__(node), do: {:ok, node}
+      defoverridable __assigns__: 2, __proto__: 0, __compile__: 1
     end
   end
 
@@ -182,7 +181,7 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
   @types ~w(gpu host virtual graph computation_graph)a
   @reserved_names ~w(input output)a
 
-  def new(_, id, module, opts \\ [], env \\ []) do
+  def new(_, id, module, opts, env) do
     with {:module, module} <- Code.ensure_loaded(module) do
       if id in @reserved_names do
         Cuda.compile_error("Reserved node name '#{id}' used")

@@ -44,5 +44,6 @@ defmodule Cuda.Graph.Pin do
     |> Enum.map(&type_size/1)
     |> Enum.reduce(1, &Kernel.*/2)
   end
+  defp type_size(i) when is_integer(i), do: i
   defp type_size(_), do: 0
 end

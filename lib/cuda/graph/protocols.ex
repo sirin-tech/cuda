@@ -35,7 +35,7 @@ defprotocol Cuda.Graph.Factory do
   Creates a new evaluation node
   """
   @spec new(node :: struct, id :: Graph.id, module :: atom, opts :: keyword, env :: Cuda.Env.t) :: struct
-  def new(node, id, module, opts, env)
+  def new(node, id, module, opts \\ [], env \\ [])
 end
 
 defimpl Cuda.Graph.NodeProto, for: Any do

@@ -61,7 +61,7 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.GPUNode do
   @doc """
   Creates a new gpu node
   """
-  def new(_, id, module, opts \\ [], env \\ []) do
+  def new(_, id, module, opts, env) do
     node = %Node{}
            |> Factory.new(id, module, opts, env)
            |> Map.from_struct

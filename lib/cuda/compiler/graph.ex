@@ -13,12 +13,21 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
       nodes = nodes
               |> Enum.map(fn {node, _pin} -> node end)
               |> Enum.reject(& &1 == gid)
-      {_, offset, _} = nodes
-                       |> Enum.with_index
-                       |> Enum.reduce({graph, 0, 0}, &collect_sizes/2)
-      state = {:ok, {graph, 0, offset, ctx, []}}
+      {_, size1, size2} = nodes
+                          |> Enum.with_index
+                          |> Enum.reduce({graph, 0, 0}, &collect_sizes/2)
+      graph = NodeProto.assign(graph, :pin_size, size1 + size2)
+
+      offset = if rem(length(nodes), 2) == 0, do: 0, else: size1
+      offsets = graph.pins |> Enum.reduce(%{}, fn
+        %{id: id, type: type}, acc when type in input_pin_types() -> Map.put(acc, id, 0)
+        %{id: id, type: type}, acc when type in output_pin_types() -> Map.put(acc, id, offset)
+      end)
+      graph = NodeProto.assign(graph, :pin_offsets, offsets)
+
+      state = {:ok, {graph, 0, size1, ctx, []}}
       with {:ok, {_, _, _, _, sources}} <- Enum.reduce(nodes, state, &collect_sources/2) do
-        {:ok, sources}
+        {:ok, NodeProto.assign(graph, :sources, sources)}
       else
         {:error, _} = error -> error
         error               -> {:error, error}
@@ -27,9 +36,9 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
       error -> {:error, error}
     end
   end
-  def sources(_, _), do: {:ok, []}
+  def sources(graph, _), do: {:ok, graph}
 
-  defp collect_sizes({node, idx}, {graph, s1, s2}) when div(idx, 2) == 0 do
+  defp collect_sizes({node, idx}, {graph, s1, s2}) do
     node = GraphProto.node(graph, node)
     {pins1, pins2} = case div(idx, 2) do
       0 -> {input_pin_types(), output_pin_types()}
@@ -55,9 +64,9 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
                    |> NodeProto.pins(output_pin_types())
                    |> Enum.reduce({offsets, offset2}, &collect_offsets/2)
     assigns = Map.put(ctx.assigns, :offsets, offsets)
-    with {:ok, node} <- node.module.handle_compile(node),
-         {:ok, src} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
-      sources = sources ++ src
+    with {:ok, node} <- node.module.__compile__(node),
+         {:ok, node} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
+      sources = sources ++ node.assigns.sources
       {:ok, {graph, offset2, offset1, ctx, sources}}
     end
   end
@@ -72,13 +81,14 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   alias Cuda.Compiler
   alias Cuda.Compiler.GPUUnit
   alias Cuda.Graph.NodeProto
+  alias Cuda.Graph.Processing
   require Logger
 
   def compile(%{type: :computation_graph} = graph, ctx) do
     Logger.info("CUDA: Compiling GPU code for graph #{graph.module} (#{graph.id})")
-    with {:ok, graph}   <- graph.module.handle_compile(graph),
-         {:ok, sources} <- GPUUnit.sources(graph, ctx),
-         {:ok, cubin}   <- Compiler.compile(sources) do
+    with {:ok, graph} <- graph.module.__compile__(graph),
+         {:ok, graph} <- GPUUnit.sources(graph, ctx),
+         {:ok, cubin} <- Compiler.compile(graph.assigns.sources) do
       {:ok, NodeProto.assign(graph, :cubin, cubin)}
     else
       _ ->
@@ -87,11 +97,24 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
         {:error, :compile_error}
     end
   end
-  def compile(%{nodes: nodes} = graph, ctx) do
+  def compile(graph, ctx) do
     Logger.info("CUDA: Compiling graph #{graph.module} (#{graph.id})")
-    with {:ok, graph}    <- graph.module.handle_compile(graph, ctx),
-         {:ok, _, nodes} <- Enum.reduce(nodes, {:ok, ctx, []}, &compile_reducer/2) do
-      {:ok, %{graph | nodes: nodes}}
+    with {:ok, graph}    <- graph.module.__compile__(graph),
+         %{} = graph     <- Processing.expand(graph),
+         %{} = graph     <- Processing.precompile_wrap(graph),
+         {:ok, _, nodes} <- Enum.reduce(graph.nodes, {:ok, ctx, []}, &compile_reducer/2) do
+      assigns = Enum.reduce(nodes, graph.assigns, fn
+        %{type: :computation_graph, assigns: %{pin_offsets: offsets}}, acc ->
+          offsets = offsets
+                    |> Enum.map(fn {pin, value} ->
+                      {convert_pin_name(pin, graph.links), value}
+                    end)
+                    |> Enum.into(%{})
+          Map.put(acc, :pin_offsets, offsets)
+        _, acc ->
+          acc
+      end)
+      {:ok, %{graph | nodes: nodes, assigns: assigns}}
     else
       _ ->
         Logger.warn("CUDA: Error while compiling graph " <>
@@ -108,6 +131,14 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   defp compile_reducer(_, error) do
     error
   end
+
+  defp convert_pin_name(id, links) do
+    Enum.find_value(links, fn
+      {{:__self__, pin}, {_, ^id}} -> pin
+      {{_, ^id}, {:__self__, pin}} -> pin
+      _ -> nil
+    end) || id
+  end
 end
 
 defimpl Cuda.Compiler.Unit, for: Cuda.Graph.Node do
@@ -115,6 +146,6 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.Node do
 
   def compile(node, ctx) do
     Logger.info("CUDA: Compiling node #{node.module} (#{node.id})")
-    node.module.handle_compile(node, ctx)
+    node.module.__compile__(node, ctx)
   end
 end

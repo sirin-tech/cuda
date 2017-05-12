@@ -34,11 +34,12 @@ defmodule Cuda.Graph do
   defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: [],
              assigns: %{}]
 
-  @self :__self__
-  @input_pins  ~w(input consumer)a
-  @output_pins ~w(output producer)a
+  import Node, only: [input_pin_types: 0, output_pin_types: 0]
 
-  @exports [add: 3, add: 4, add: 5, link: 3]
+  @self :__self__
+  @exports [add: 3, add: 4, add: 5,
+            chain: 3, chain: 4, chain: 5,
+            close: 1, link: 3]
 
   defmacro __using__(_opts) do
     quote do
@@ -56,7 +57,7 @@ defmodule Cuda.Graph do
             end
           _, _, st ->
             {:ok, st}
-        end)
+        end, %{})
       end
 
       defoverridable __run__: 1, __type__: 1
@@ -72,12 +73,63 @@ defmodule Cuda.Graph do
     end
   end
 
+  def chain(graph, id, module, opts \\ [], env \\ [])
+  def chain(%__MODULE__{nodes: []} = graph, id, module, opts, env) do
+    src_pin = case NodeProto.pins(graph, input_pin_types()) do
+      [src_pin] -> src_pin
+      _         -> compile_error("Chain allowed only for graphs with single input")
+    end
+    with %{nodes: [node]} <- add(graph, id, module, opts, env) do
+      dst_pin = case NodeProto.pins(node, input_pin_types()) do
+        [dst_pin] -> dst_pin
+        _         -> compile_error("Chain can only be applied to nodes with single input")
+      end
+      link(graph, src_pin.id, {id, dst_pin.id})
+    end
+  end
+  def chain(%__MODULE__{nodes: [src_node | _]} = graph, id, module, opts, env) do
+    src_pin = case NodeProto.pins(src_node, output_pin_types()) do
+      [src_pin] -> src_pin
+      _         -> compile_error("Chain can only be applied after nodes with single output")
+    end
+    with %{nodes: [dst_node | _]} <- add(graph, id, module, opts, env) do
+      dst_pin = case NodeProto.pins(dst_node, input_pin_types()) do
+        [dst_pin] -> dst_pin
+        _         -> compile_error("Chain can only be applied to nodes with single input")
+      end
+      link(graph, {src_node.id, src_pin.id}, {dst_node.id, dst_pin.id})
+    end
+  end
+
+  def close(%__MODULE__{nodes: []} = graph) do
+    src_pin = case NodeProto.pins(graph, input_pin_types()) do
+      [src_pin] -> src_pin
+      _         -> compile_error("Close allowed only for graphs with single input")
+    end
+    dst_pin = case NodeProto.pins(graph, output_pin_types()) do
+      [dst_pin] -> dst_pin
+      _         -> compile_error("Close allowed only for graphs with single output")
+    end
+    link(graph, src_pin.id, dst_pin.id)
+  end
+  def close(%__MODULE__{nodes: [node | _]} = graph) do
+    src_pin = case NodeProto.pins(node, output_pin_types()) do
+      [src_pin] -> src_pin
+      _         -> compile_error("Close can only be applied after nodes with single output")
+    end
+    dst_pin = case NodeProto.pins(graph, output_pin_types()) do
+      [dst_pin] -> dst_pin
+      _         -> compile_error("Close allowed only for graphs with single output")
+    end
+    link(graph, {node.id, src_pin.id}, dst_pin.id)
+  end
+
   def link(%__MODULE__{links: links} = graph, {sn, sp} = src, {dn, dp} = dst) do
     # node to node connection
     with {:src, %{} = src_node} <- {:src, GraphProto.node(graph, sn)},
          {:dst, %{} = dst_node} <- {:dst, GraphProto.node(graph, dn)} do
-      src_pin = assert_pin_type(src_node, sp, @output_pins)
-      dst_pin = assert_pin_type(dst_node, dp, @input_pins)
+      src_pin = assert_pin_type(src_node, sp, output_pin_types())
+      dst_pin = assert_pin_type(dst_node, dp, input_pin_types())
       assert_pin_data_type(src_pin, dst_pin)
       %{graph | links: [{src, dst} | links]}
     else
@@ -89,8 +141,8 @@ defmodule Cuda.Graph do
   def link(%__MODULE__{links: links} = graph, src, {dn, dp} = dst) do
     # input to node connection
     with %{} = dst_node <- GraphProto.node(graph, dn) do
-      src_pin = assert_pin_type(graph, src, @input_pins)
-      dst_pin = assert_pin_type(dst_node, dp, @input_pins)
+      src_pin = assert_pin_type(graph, src, input_pin_types())
+      dst_pin = assert_pin_type(dst_node, dp, input_pin_types())
       assert_pin_data_type(src_pin, dst_pin)
       %{graph | links: [{{@self, src}, dst} | links]}
     else
@@ -101,8 +153,8 @@ defmodule Cuda.Graph do
   def link(%__MODULE__{links: links} = graph, {sn, sp} = src, dst) do
     # node to output connection
     with %{} = src_node <- GraphProto.node(graph, sn) do
-      src_pin = assert_pin_type(graph, dst, @output_pins)
-      dst_pin = assert_pin_type(src_node, sp, @output_pins)
+      src_pin = assert_pin_type(graph, dst, output_pin_types())
+      dst_pin = assert_pin_type(src_node, sp, output_pin_types())
       assert_pin_data_type(src_pin, dst_pin)
       %{graph | links: [{src, {@self, dst}} | links]}
     else
@@ -112,8 +164,8 @@ defmodule Cuda.Graph do
 
   def link(%__MODULE__{links: links} = graph, src, dst) do
     # input to output connection
-    src_pin = assert_pin_type(graph, src, @input_pins)
-    dst_pin = assert_pin_type(graph, dst, @output_pins)
+    src_pin = assert_pin_type(graph, src, input_pin_types())
+    dst_pin = assert_pin_type(graph, dst, output_pin_types())
     assert_pin_data_type(src_pin, dst_pin)
     %{graph | links: [{{@self, src}, {@self, dst}} | links]}
   end
@@ -145,7 +197,7 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph do
   @doc """
   Creates new graph node
   """
-  def new(_, id, module, opts \\ [], env \\ []) do
+  def new(_, id, module, opts, env) do
     with {:module, module} <- Code.ensure_loaded(module) do
       proto = Node.proto(module)
       graph = %Node{}

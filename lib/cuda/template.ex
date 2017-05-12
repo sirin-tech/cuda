@@ -30,7 +30,7 @@ defmodule Cuda.Template do
   """
   @spec ptx_eval(template :: String.t, opts :: options) :: String.t
   def ptx_eval(template, opts) do
-    hlprs = [Cuda.Template.Helpers] ++
+    hlprs = [Kernel, Cuda.Template.Helpers] ++
             Keyword.get(opts, :ptx_helpers, []) ++
             Keyword.get(opts, :helpers, [])
     ctx = Keyword.get(opts, :context)
@@ -42,7 +42,7 @@ defmodule Cuda.Template do
   """
   @spec c_eval(template :: String.t, opts :: options) :: String.t
   def c_eval(template, opts) do
-    hlprs = [Cuda.Template.Helpers] ++
+    hlprs = [Kernel, Cuda.Template.Helpers] ++
             Keyword.get(opts, :c_helpers, []) ++
             Keyword.get(opts, :helpers, [])
     ctx = Keyword.get(opts, :context)
