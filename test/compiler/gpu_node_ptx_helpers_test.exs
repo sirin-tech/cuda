@@ -20,7 +20,7 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
   defp gen_ptx(text) do
     node = new_node(text)
     ctx = %{context() | assigns: %{offsets: [i: 0, o: 2]}}
-    {:ok, [{:ptx, ptx}]} = GPUUnit.sources(node, ctx)
+    {:ok, %{assigns: %{sources: [{:ptx, ptx}]}}} = GPUUnit.sources(node, ctx)
     parse_ptx(ptx)
   end
 

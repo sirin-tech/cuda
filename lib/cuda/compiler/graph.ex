@@ -9,6 +9,15 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   import Node, only: [input_pin_types: 0, output_pin_types: 0]
 
   def sources(%{type: :computation_graph, id: gid} = graph, ctx) do
+    # temporary guard to deny graph with multiple inputs and outputs
+    # remove it when multiple io will be suuported by runner
+    if length(NodeProto.pins(graph, input_pin_types())) > 1 do
+      raise CompileError, description: "Multiple inputs are not supported"
+    end
+    if length(NodeProto.pins(graph, output_pin_types())) > 1 do
+      raise CompileError, description: "Multiple outputs are not supported"
+    end
+
     with {:ok, nodes} <- Processing.topology_sort(graph) do
       nodes = nodes
               |> Enum.map(fn {node, _pin} -> node end)
@@ -25,9 +34,12 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
       end)
       graph = NodeProto.assign(graph, :pin_offsets, offsets)
 
-      state = {:ok, {graph, 0, size1, ctx, []}}
-      with {:ok, {_, _, _, _, sources}} <- Enum.reduce(nodes, state, &collect_sources/2) do
-        {:ok, NodeProto.assign(graph, :sources, sources)}
+      state = {:ok, {graph, 0, size1, ctx, [], []}}
+      with {:ok, {_, _, _, _, sources, batch}} <- Enum.reduce(nodes, state, &collect_sources/2) do
+        graph = graph
+                |> NodeProto.assign(:sources, sources)
+                |> NodeProto.assign(:batch, batch)
+        {:ok, graph}
       else
         {:error, _} = error -> error
         error               -> {:error, error}
@@ -55,7 +67,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     {graph, Enum.max([s1, size1]), Enum.max([s2, size2])}
   end
 
-  defp collect_sources(node, {:ok, {graph, offset1, offset2, ctx, sources}}) do
+  defp collect_sources(node, {:ok, {graph, offset1, offset2, ctx, sources, batch}}) do
     node = GraphProto.node(graph, node)
     {offsets, _} = node
                    |> NodeProto.pins(input_pin_types())
@@ -66,8 +78,13 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     assigns = Map.put(ctx.assigns, :offsets, offsets)
     with {:ok, node} <- node.module.__compile__(node),
          {:ok, node} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
+      node_batch = node.module.__batch__(node) |> Enum.map(fn
+                     {name, g, b, args} -> {"#{node.id}__#{name}", g, b, args}
+                     {name, g, b}       -> {"#{node.id}__#{name}", g, b, []}
+                   end)
+      batch = batch ++ node_batch
       sources = sources ++ node.assigns.sources
-      {:ok, {graph, offset2, offset1, ctx, sources}}
+      {:ok, {graph, offset2, offset1, ctx, sources, batch}}
     end
   end
   defp collect_sources(_, error), do: error
@@ -81,6 +98,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   alias Cuda.Compiler
   alias Cuda.Compiler.GPUUnit
   alias Cuda.Graph.NodeProto
+  alias Cuda.Graph.GraphProto
   alias Cuda.Graph.Processing
   require Logger
 
@@ -102,6 +120,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
     with {:ok, graph}    <- graph.module.__compile__(graph),
          %{} = graph     <- Processing.expand(graph),
          %{} = graph     <- Processing.precompile_wrap(graph),
+         %{} = graph     <- topology_sort(graph),
          {:ok, _, nodes} <- Enum.reduce(graph.nodes, {:ok, ctx, []}, &compile_reducer/2) do
       assigns = Enum.reduce(nodes, graph.assigns, fn
         %{type: :computation_graph, assigns: %{pin_offsets: offsets}}, acc ->
@@ -120,6 +139,18 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
         Logger.warn("CUDA: Error while compiling graph " <>
                     "#{graph.module} (#{graph.id})")
         {:error, :compile_error}
+    end
+  end
+
+  defp topology_sort(%{id: gid} = graph) do
+    with {:ok, nodes} <- Processing.topology_sort(graph) do
+      nodes = nodes
+              |> Enum.map(fn {node, _pin} -> node end)
+              |> Enum.reject(& &1 == gid)
+              |> Enum.map(& GraphProto.node(graph, &1))
+      %{graph | nodes: nodes}
+    else
+      _ -> graph
     end
   end
 

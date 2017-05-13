@@ -22,7 +22,7 @@ defmodule Cuda.Graph.ProcessingTest do
       # [i]──▶[input (a) output]──▶[o]
       {:ok, result} = dfs(graph(:i1_single1_o1), &traverser/3, [])
       assert [{:enter, {:g, :i}}, {:move, {:g, :i}, {:a, :input}},
-              {:enter, {:a, :input}}, {:move, {:a, :input}, {:g, :o}},
+              {:enter, {:a, :input}}, {:move, {:a, :output}, {:g, :o}},
               {:enter, {:g, :o}}, {:leave, {:g, :o}},
               {:leave, {:a, :input}},
               {:leave, {:g, :i}}] = result
@@ -31,11 +31,11 @@ defmodule Cuda.Graph.ProcessingTest do
       #     └─▶[input (b) output]──▶[o2]
       {:ok, result} = dfs(graph(:i1_single2_o2), &traverser/3, [])
       assert [{:enter, {:g, :i}}, {:move, {:g, :i}, {:b, :input}},
-              {:enter, {:b, :input}}, {:move, {:b, :input}, {:g, :o2}},
+              {:enter, {:b, :input}}, {:move, {:b, :output}, {:g, :o2}},
               {:enter, {:g, :o2}}, {:leave, {:g, :o2}},
               {:leave, {:b, :input}},
               {:move, {:g, :i}, {:a, :input}},
-              {:enter, {:a, :input}}, {:move, {:a, :input}, {:g, :o1}},
+              {:enter, {:a, :input}}, {:move, {:a, :output}, {:g, :o1}},
               {:enter, {:g, :o1}}, {:leave, {:g, :o1}},
               {:leave, {:a, :input}},
               {:leave, {:g, :i}}] = result
@@ -44,9 +44,9 @@ defmodule Cuda.Graph.ProcessingTest do
       # [i2]──▶⎣input2     output2⎦──▶[o2]
       {:ok, result} = dfs(graph(:i2_double1_o2), &traverser/3, [])
       assert [{:enter, {:g, :i1}}, {:move, {:g, :i1}, {:a, :input1}},
-              {:enter, {:a, :input1}}, {:move, {:a, :input1}, {:g, :o1}},
+              {:enter, {:a, :input1}}, {:move, {:a, :output1}, {:g, :o1}},
               {:enter, {:g, :o1}}, {:leave, {:g, :o1}},
-              {:move, {:a, :input1}, {:g, :o2}},
+              {:move, {:a, :output2}, {:g, :o2}},
               {:enter, {:g, :o2}}, {:leave, {:g, :o2}},
               {:leave, {:a, :input1}},
               {:leave, {:g, :i1}},
@@ -59,9 +59,9 @@ defmodule Cuda.Graph.ProcessingTest do
       #    └───────────────────────┘
       {:ok, result} = dfs(graph(:i1_double1_o1), &traverser/3, [])
       assert [{:enter, {:g, :i}}, {:move, {:g, :i}, {:a, :input1}},
-              {:enter, {:a, :input1}}, {:move, {:a, :input1}, {:g, :o}},
+              {:enter, {:a, :input1}}, {:move, {:a, :output1}, {:g, :o}},
               {:enter, {:g, :o}}, {:leave, {:g, :o}},
-              {:move, {:a, :input1}, {:a, :input2}},
+              {:move, {:a, :output2}, {:a, :input2}},
               {:enter, {:a, :input2}}, {:leave, {:a, :input2}},
               {:leave, {:a, :input1}},
               {:leave, {:g, :i}}] = result

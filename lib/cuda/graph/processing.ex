@@ -83,28 +83,29 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     with {:ok, st} <- result do
       result = node_spec
                |> dfs_next_spec(st.graph)
-               |> Enum.reduce({:ok, st}, & dfs_reducer(node, &1, &2))
+               |> Enum.reduce({:ok, st}, &dfs_reducer/2)
       with {:ok, st} <- result, do: dfs_yield(:leave, node, st)
     end
   end
   defp dfs_search(_, result), do: result
 
-  defp dfs_reducer(node, next, {:ok, st}) do
+  defp dfs_reducer(next, {:ok, st}) do
     next = Enum.filter(st.graph.links, fn
-      {^next, dst} -> dst
-      _            -> nil
+      {^next, _} -> true
+      _          -> nil
     end)
     if next == [], do: compile_error("unconnected pin detected")
-    next |> Enum.reduce({:ok, st}, & dfs_next_reducer(node, &1, &2))
+    next |> Enum.reduce({:ok, st}, &dfs_next_reducer/2)
   end
-  defp dfs_reducer(_node, _next, result) do
+  defp dfs_reducer(_next, result) do
     result
   end
 
-  defp dfs_next_reducer(node, {_, dst_spec}, {:ok, st}) do
+  defp dfs_next_reducer({src_spec, dst_spec}, {:ok, st}) do
     if not dst_spec in st.nodes do
+      src = dfs_node_pin_by_spec(st.graph, src_spec)
       dst = dfs_node_pin_by_spec(st.graph, dst_spec)
-      with {:ok, st} <- dfs_yield(:move, {node, dst}, st) do
+      with {:ok, st} <- dfs_yield(:move, {src, dst}, st) do
         # recursion
         dfs_search(dst_spec, {:ok, st})
       end
@@ -112,7 +113,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       {:ok, st}
     end
   end
-  defp dfs_next_reducer(_node, _next, result), do: result
+  defp dfs_next_reducer(_next, result), do: result
 
   defp dfs_next_spec({:__self__, pin} = node_spec, graph) do
     case NodeProto.pin(graph, pin) do
@@ -135,8 +136,8 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     case st.callback.(action, arg, st.state) do
       {action, state} ->
         {action, %{st | state: state}}
-      _ ->
-        compile_error("Unexpected result returned from `dfs` callback")
+      result ->
+        compile_error("Unexpected result `#{inspect result}` returned from `dfs` callback")
     end
   end
 

@@ -37,6 +37,7 @@ defmodule Cuda.Graph.GPUNode do
 
   @callback __ptx__(node :: struct) :: source
   @callback __c__(node :: struct) :: source
+  @callback __batch__(node :: struct) :: [any]
 
   @derive [NodeProto]
   defstruct [:id, :module, :type, pins: [], assigns: %{}]
@@ -47,9 +48,10 @@ defmodule Cuda.Graph.GPUNode do
       @behaviour unquote(__MODULE__)
       def __ptx__(_node), do: []
       def __c__(_node), do: []
+      def __batch__(_node), do: []
       def __proto__(), do: unquote(__MODULE__)
       def __type__(_assigns), do: :gpu
-      defoverridable __c__: 1, __ptx__: 1
+      defoverridable __batch__: 1, __c__: 1, __ptx__: 1
     end
   end
 end

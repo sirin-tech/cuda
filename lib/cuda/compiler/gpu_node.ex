@@ -74,7 +74,6 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
     defp parse_arg({name, type}, opts) when is_atom(type) do
       {name, type, opts}
     end
-                  #{:test, {{:., [], [{:me, [], Elixir}, :ptr]}
     defp parse_arg({name, {{:., _, [{type, _, x}, opt]}, _, _}}, opts) when is_atom(x) do
       {name, type, [{opt, true} | opts]}
     end
@@ -116,19 +115,44 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
   alias Cuda.Compiler
   alias Cuda.Compiler.GPUUnit
   alias Cuda.Graph.NodeProto
+  alias Cuda.Graph.Pin
   require Logger
 
   def compile(node, ctx) do
     Logger.info("CUDA: Compiling GPU code for node #{node.module} (#{node.id})")
     with {:ok, node}  <- node.module.__compile__(node),
+         %{} = node   <- assign_pin_sizes(node),
+         %{} = node   <- assign_offsets(node),
+         ctx = %{ctx | assigns: Map.put(ctx.assigns, :offsets, node.assigns.offsets)},
          {:ok, node}  <- GPUUnit.sources(node, ctx),
          {:ok, cubin} <- Compiler.compile(node.assigns.sources) do
-      {:ok, NodeProto.assign(node, :cubin, cubin)}
+      batch = node.module.__batch__(node)
+              |> Enum.map(fn
+                {name, g, b, args} -> {"#{node.id}__#{name}", g, b, args}
+                {name, g, b}       -> {"#{node.id}__#{name}", g, b, []}
+              end)
+      node = node
+             |> NodeProto.assign(:cubin, cubin)
+             |> NodeProto.assign(:batch, batch)
+      {:ok, node}
     else
       _ ->
         Logger.warn("CUDA: Error occured while compiling GPU code for node " <>
                     "#{node.module} (#{node.id})")
         {:error, :compile_error}
     end
+  end
+
+  defp assign_pin_sizes(%{pins: pins} = node) do
+    sizes = pins |> Enum.map(& {&1.id, Pin.data_size(&1)}) |> Enum.into(%{})
+    NodeProto.assign(node, :pin_sizes, sizes)
+  end
+
+  defp assign_offsets(%{assigns: %{offsets: o}} = node) when is_map(o), do: node
+  defp assign_offsets(%{assigns: %{pin_sizes: sizes}} = node) do
+    {offsets, _} = Enum.reduce(sizes, {%{}, 0}, fn {k, size}, {offsets, offset} ->
+      {Map.put(offsets, k, offset), offset + size}
+    end)
+    NodeProto.assign(node, :offsets, offsets)
   end
 end
