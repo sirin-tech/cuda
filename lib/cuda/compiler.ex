@@ -22,7 +22,7 @@ defmodule Cuda.Compiler do
     result = with {_, 0} <- System.cmd(nvcc, args, opts) do
       File.read(cubin)
     end
-    #File.rm_rf!(tmp)
+    File.rm_rf!(tmp)
     result
   end
 end
