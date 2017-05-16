@@ -64,6 +64,8 @@ ETERM *DriverPort::HandleTermFunction(std::string name, ETERM *arg) {
   if (name == "compile") return Compile(arg);
   if (name == "memory_read") return MemoryRead(arg);
   if (name == "memory_unload") return MemoryUnload(arg);
+  if (name == "memory_share") return MemoryShare(arg);
+  if (name == "memory_load") return MemoryLoad(arg);
   if (name == "module_load") return ModuleLoad(arg);
   if (name == "run") return Run(arg);
   if (name == "stream") return Stream(arg);
@@ -114,6 +116,20 @@ ETERM *DriverPort::MemoryUnload(ETERM *arg) {
   auto n = GetMemoryIndex(arg);
   driver->UnloadMemory(n);
   return erl_mk_atom(OK_STR);
+}
+
+ETERM *DriverPort::MemoryShare(ETERM *arg) {
+  DEBUG("Enter DriverPort::MemoryShare");
+  auto n = GetMemoryIndex(arg);
+  auto mem = driver->ShareMemory(n);
+  return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(mem));
+}
+
+ETERM *DriverPort::MemoryLoad(ETERM *arg) {
+  DEBUG("Enter DriverPort::MemoryLoad");
+  auto mem = driver->Unpack<SharedMemory>(arg);
+  int n = driver->LoadMemory(mem);
+  return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(n));
 }
 
 ETERM *DriverPort::ModuleLoad(ETERM *arg) {
@@ -251,7 +267,7 @@ ETERM *DriverPort::Stream(ETERM *arg) {
 }
 
 ETERM *DriverPort::MemoryLoad(RawData &data, size_t size) {
-  DEBUG("Enter DriverPort::MemoryLoad");
+  DEBUG("Enter raw DriverPort::MemoryLoad");
   int n = driver->LoadMemory(data.get(), size);
   return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(n));
 }

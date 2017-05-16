@@ -18,8 +18,10 @@ protected:
   ETERM *MemoryRead(ETERM *arg);
   ETERM *MemoryUnload(ETERM *arg);
   ETERM *ModuleLoad(ETERM *arg);
+  ETERM *MemoryShare(ETERM *arg);
   ETERM *Run(ETERM *arg);
   ETERM *MemoryLoad(RawData &data, size_t size);
+  ETERM *MemoryLoad(ETERM *arg);
   ETERM *Stream(ETERM *arg);
 public:
   DriverPort(int device);

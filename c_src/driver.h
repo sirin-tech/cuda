@@ -40,10 +40,13 @@ public:
   void **OptionsValues();
 };
 
+typedef std::tuple<CUipcMemHandle, size_t> SharedMemory;
+
 class DeviceMemory {
 private:
   CUdeviceptr ptr = (CUdeviceptr)NULL;
   bool initialized = false;
+  bool shared = false;
   size_t size;
 public:
   DeviceMemory(const void *src, size_t srcSize): size(srcSize) {
@@ -54,10 +57,19 @@ public:
     initialized = true;
     DEBUG("Device memory initialized with size " << srcSize);
   }
+  DeviceMemory(CUipcMemHandle handle, size_t memSize): size(memSize) {
+    auto result = cuIpcOpenMemHandle(&ptr, handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "DeviceMemory:ipc");
+    shared = true;
+    initialized = true;
+    DEBUG("Device memory initialized from shared with size " << memSize);
+  }
 
   ~DeviceMemory() {
     DEBUG("Device memory destroyed");
-    if (initialized) cuMemFree(ptr);
+    if (initialized) {
+      shared ? cuIpcCloseMemHandle(ptr) : cuMemFree(ptr);
+    }
   }
 
   void Read(void *dst, int dstSize = -1) {
@@ -135,14 +147,17 @@ public:
   int Compile(std::list<std::string> sources, LinkerOptions &options);
   int LoadModule(std::string cubin, LinkerOptions &options);
   int LoadMemory(const void *src, size_t size);
+  int LoadMemory(SharedMemory mem);
   void UnloadMemory(int id);
   void ReadMemory(int id, void *dst, int size = -1);
   int GetMemorySize(int id);
   DeviceMemory *GetMemory(int id);
+  SharedMemory ShareMemory(int id);
   void Run(int moduleNo, RunParameters &params, std::shared_ptr<RunArguments> &args);
   void Stream(int moduleNo, std::vector<RunEnvironment> &batch);
   template <typename T> T Unpack(ETERM *value);
   ETERM *PackMemory(int idx);
+  ETERM *PackMemory(SharedMemory mem);
   ETERM *PackModule(int idx);
 };
 

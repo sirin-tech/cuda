@@ -57,6 +57,16 @@ int Driver::LoadMemory(const void *src, size_t size) {
   return memNo;
 }
 
+int Driver::LoadMemory(SharedMemory sharedMemory) {
+  CUipcMemHandle handle;
+  size_t size;
+  std::tie(handle, size) = sharedMemory;
+  auto mem = new DeviceMemory(handle, size);
+  int memNo = memory.size() + 1;
+  memory.insert(std::pair<int, DeviceMemory *>(memNo, mem));
+  return memNo;
+}
+
 void Driver::UnloadMemory(int id) {
   auto mem = memory.find(id);
   if (mem == memory.end()) throw StringError("Invalid memory handle");
@@ -68,6 +78,15 @@ void Driver::ReadMemory(int id, void *dst, int size) {
   auto mem = memory.find(id);
   if (mem == memory.end()) throw StringError("Invalid memory handle");
   mem->second->Read(dst, size);
+}
+
+SharedMemory Driver::ShareMemory(int id) {
+  auto mem = memory.find(id);
+  if (mem == memory.end()) throw StringError("Invalid memory handle");
+  CUipcMemHandle handle;
+  auto result = cuIpcGetMemHandle(&handle, mem->second->GetPtr());
+  if (result != CUDA_SUCCESS) throw DriverError(result);
+  return std::make_tuple(handle, mem->second->GetSize());
 }
 
 int Driver::GetMemorySize(int id) {
@@ -150,6 +169,25 @@ template <> DeviceMemory *Driver::Unpack<DeviceMemory *>(ETERM *value) {
   return mem;
 }
 
+template <> SharedMemory Driver::Unpack<SharedMemory>(ETERM *value) {
+  if (!ERL_IS_TUPLE(value) || erl_size(value) != 2) {
+    throw StringError("Invalid memory handle");
+  }
+  auto a = erl_element(1, value);
+  auto v = erl_element(2, value);
+  if (!ERL_IS_ATOM(a) || !ATOM_EQ(a, "shared_memory")) {
+    throw StringError("Invalid shared memory handle");
+  }
+  if (!ERL_IS_TUPLE(v)) throw StringError("Invalid shared memory handle");
+  auto h = erl_element(1, v);
+  auto size = Get<int>(erl_element(2, v));
+  if (!ERL_IS_BINARY(h) || ERL_BIN_SIZE(h) != sizeof(CUipcMemHandle)) {
+    throw StringError("Invalid shared memory handle");
+  }
+  CUipcMemHandle *handle = (CUipcMemHandle *)ERL_BIN_PTR(h);
+  return std::make_tuple(*handle, size);
+}
+
 template <> CUmodule Driver::Unpack<CUmodule>(ETERM *value) {
   if (!ERL_IS_TUPLE(value) || erl_size(value) != 2) {
     throw StringError("Invalid module handle");
@@ -166,6 +204,15 @@ template <> CUmodule Driver::Unpack<CUmodule>(ETERM *value) {
 
 ETERM *Driver::PackMemory(int idx) {
   return FORMAT("{~a,~i}", C_STR("memory"), idx);
+}
+
+ETERM *Driver::PackMemory(SharedMemory mem) {
+  CUipcMemHandle handle;
+  size_t size;
+  std::tie(handle, size) = mem;
+  return FORMAT("{~a,{~w,~i}}", C_STR("shared_memory"),
+                                erl_mk_binary((char *)&handle, sizeof(CUipcMemHandle)),
+                                size);
 }
 
 ETERM *Driver::PackModule(int idx) {

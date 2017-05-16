@@ -7,8 +7,92 @@ defmodule Cuda do
 
   @term_call <<1>>
   @raw_call  <<2>>
+  @proxied_calls ~w(call call_raw)a
 
   @type error_tuple :: {:error, String.t}
+
+  defmacro __using__(_opts) do
+    quote do
+      use GenServer
+      require Logger
+
+      defdelegate info(pid), to: unquote(__MODULE__)
+      defdelegate info(pid, info), to: unquote(__MODULE__)
+      defdelegate compile(pid, src), to: unquote(__MODULE__)
+      defdelegate compile(pid, src, opts), to: unquote(__MODULE__)
+      defdelegate module_load(pid, src), to: unquote(__MODULE__)
+      defdelegate module_load(pid, src, opts), to: unquote(__MODULE__)
+      defdelegate memory_load(pid, data), to: unquote(__MODULE__)
+      defdelegate module_read(pid, handle), to: unquote(__MODULE__)
+      defdelegate module_unload(pid, handle), to: unquote(__MODULE__)
+      defdelegate module_share(pid, handle), to: unquote(__MODULE__)
+      defdelegate run(pid, module, func, params), to: unquote(__MODULE__)
+      defdelegate run(pid, module, func, block, params), to: unquote(__MODULE__)
+      defdelegate run(pid, module, func, block, grid, params), to: unquote(__MODULE__)
+      defdelegate stream(pid, module, batch), to: unquote(__MODULE__)
+      defdelegate start_link(), to: unquote(__MODULE__)
+      defdelegate start_link(opts), to: unquote(__MODULE__)
+
+      def __init__(opts), do: {:ok, opts}
+      def __handle_call__(_msg, _from, st), do: {:noreply, st}
+      def __handle_cast__(_msg, st), do: {:noreply, st}
+      def __handle_into__(_msg, st), do: {:noreply, st}
+
+      def init(opts) do
+        with {:ok, proxy_st} <- unquote(__MODULE__).init(opts),
+             {:ok, st} <- __init__(opts) do
+          {:ok, {st, proxy_st}}
+        end
+      end
+
+      def handle_call({x, _, _} = msg, from, {st, proxy_st}) when x in unquote(@proxied_calls) do
+        case unquote(__MODULE__).handle_call(msg, from, proxy_st) do
+          {:reply, reply, proxy_st} -> {:reply, reply, {st, proxy_st}}
+          {:reply, reply, proxy_st, timeout} -> {:reply, reply, {st, proxy_st}, timeout}
+          {:noreply, proxy_st} -> {:noreply, {st, proxy_st}}
+          {:noreply, proxy_st, timeout} -> {:noreply, {st, proxy_st}, timeout}
+          {:stop, reason, reply, proxy_st} -> {:stop, reason, reply, {st, proxy_st}}
+          {:stop, reason, proxy_st} -> {:stop, reason, {st, proxy_st}}
+        end
+      end
+      def handle_call(msg, from, {st, proxy_st}) do
+        case __handle_call__(msg, from, st) do
+          {:reply, reply, st} -> {:reply, reply, {st, proxy_st}}
+          {:reply, reply, st, timeout} -> {:reply, reply, {st, proxy_st}, timeout}
+          {:noreply, st} -> {:noreply, {st, proxy_st}}
+          {:noreply, st, timeout} -> {:noreply, {st, proxy_st}, timeout}
+          {:stop, reason, reply, st} -> {:stop, reason, reply, {st, proxy_st}}
+          {:stop, reason, st} -> {:stop, reason, {st, proxy_st}}
+        end
+      end
+
+      def handle_cast(msg, {st, proxy_st}) do
+        case __handle_cast__(msg, st) do
+          {:noreply, st} -> {:noreply, {st, proxy_st}}
+          {:noreply, st, timeout} -> {:noreply, {st, proxy_st}, timeout}
+          {:stop, reason, st} -> {:stop, reason, {st, proxy_st}}
+        end
+      end
+
+      def handle_info({_port, {:data, unquote(@term_call) <> _}} = msg, {st, proxy_st}) do
+        case unquote(__MODULE__).handle_info(msg, proxy_st) do
+          {:noreply, proxy_st} -> {:noreply, {st, proxy_st}}
+          {:noreply, proxy_st, timeout} -> {:noreply, {st, proxy_st}, timeout}
+          {:stop, reason, proxy_st} -> {:stop, reason, {st, proxy_st}}
+        end
+      end
+      def handle_info(msg, {st, proxy_st}) do
+        case __handle_info__(msg, st) do
+          {:noreply, st} -> {:noreply, {st, proxy_st}}
+          {:noreply, st, timeout} -> {:noreply, {st, proxy_st}, timeout}
+          {:stop, reason, st} -> {:stop, reason, {st, proxy_st}}
+        end
+      end
+
+      defoverridable __init__: 1, __handle_call__: 3, __handle_cast__: 2,
+                     __handle_info__: 2
+    end
+  end
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, [])
@@ -63,8 +147,11 @@ defmodule Cuda do
     GenServer.call(pid, {:call, :module_load, {src, opts}})
   end
 
-  def memory_load(pid, data) do
+  def memory_load(pid, data) when is_binary(data) do
     GenServer.call(pid, {:call_raw, :memory_load, data})
+  end
+  def memory_load(pid, data) do
+    GenServer.call(pid, {:call, :memory_load, data})
   end
 
   def memory_read(pid, handle) do
@@ -73,6 +160,10 @@ defmodule Cuda do
 
   def memory_unload(pid, handle) do
     GenServer.call(pid, {:call, :memory_unload, handle})
+  end
+
+  def memory_share(pid, handle) do
+    GenServer.call(pid, {:call, :memory_share, handle})
   end
 
   def run(pid, module, func) do

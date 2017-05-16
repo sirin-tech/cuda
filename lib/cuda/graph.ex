@@ -28,7 +28,7 @@ defmodule Cuda.Graph do
   @type dfs_callback :: (action :: dfs_action, arg :: any, state :: any -> dfs_result)
 
   @callback __graph__(graph :: t) :: t
-  @callback __run__(graph :: t) :: any
+  @callback __child_options__(id :: id, module :: atom, graph :: t) :: Node.options
 
   @derive [NodeProto, GraphProto]
   defstruct [:id, :module, type: :graph, pins: [], nodes: [], links: [],
@@ -37,8 +37,8 @@ defmodule Cuda.Graph do
   import Node, only: [input_pin_types: 0, output_pin_types: 0]
 
   @self :__self__
-  @exports [add: 3, add: 4, add: 5,
-            chain: 3, chain: 4, chain: 5,
+  @exports [add: 3, add: 4,
+            chain: 3, chain: 4,
             close: 1, link: 3]
 
   defmacro __using__(_opts) do
@@ -48,38 +48,31 @@ defmodule Cuda.Graph do
       @behaviour unquote(__MODULE__)
       def __type__(_assigns), do: :graph
       def __proto__(), do: unquote(__MODULE__)
+      def __child_options__(_id, _module, _graph), do: []
 
-      def __run__(graph) do
-        Cuda.Graph.Processing.dfs(graph, fn
-          :enter, {node, _}, st ->
-            with {:ok, data} <- node.module.__run__(node) do
-              {:ok, st}
-            end
-          _, _, st ->
-            {:ok, st}
-        end, %{})
-      end
-
-      defoverridable __run__: 1, __type__: 1
+      defoverridable __child_options__: 3, __type__: 1
     end
   end
 
-  def add(%__MODULE__{} = graph, id, module, opts \\ [], env \\ []) do
+  def add(%__MODULE__{} = graph, id, module, opts \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
       proto = struct(Node.proto(module))
-      GraphProto.add(graph, Cuda.Graph.Factory.new(proto, id, module, opts, env))
+      opts = id
+             |> graph.module.__child_options__(module, graph)
+             |> Keyword.merge(opts)
+      GraphProto.add(graph, Cuda.Graph.Factory.new(proto, id, module, opts, graph.assigns.env))
     else
       _ -> compile_error("Graph module #{module} could not be loaded")
     end
   end
 
-  def chain(graph, id, module, opts \\ [], env \\ [])
-  def chain(%__MODULE__{nodes: []} = graph, id, module, opts, env) do
+  def chain(graph, id, module, opts \\ [])
+  def chain(%__MODULE__{nodes: []} = graph, id, module, opts) do
     src_pin = case NodeProto.pins(graph, input_pin_types()) do
       [src_pin] -> src_pin
       _         -> compile_error("Chain allowed only for graphs with single input")
     end
-    with %{nodes: [node]} = graph <- add(graph, id, module, opts, env) do
+    with %{nodes: [node]} = graph <- add(graph, id, module, opts) do
       dst_pin = case NodeProto.pins(node, input_pin_types()) do
         [dst_pin] -> dst_pin
         _         -> compile_error("Chain can only be applied to nodes with single input")
@@ -87,12 +80,12 @@ defmodule Cuda.Graph do
       link(graph, src_pin.id, {id, dst_pin.id})
     end
   end
-  def chain(%__MODULE__{nodes: [src_node | _]} = graph, id, module, opts, env) do
+  def chain(%__MODULE__{nodes: [src_node | _]} = graph, id, module, opts) do
     src_pin = case NodeProto.pins(src_node, output_pin_types()) do
       [src_pin] -> src_pin
       _         -> compile_error("Chain can only be applied after nodes with single output")
     end
-    with %{nodes: [dst_node | _]} = graph <- add(graph, id, module, opts, env) do
+    with %{nodes: [dst_node | _]} = graph <- add(graph, id, module, opts) do
       dst_pin = case NodeProto.pins(dst_node, input_pin_types()) do
         [dst_pin] -> dst_pin
         _         -> compile_error("Chain can only be applied to nodes with single input")
@@ -183,6 +176,14 @@ defmodule Cuda.Graph do
     end
   end
 
+  # TODO: move pin type checking logic into Cuda.Graph.Pin
+  defp assert_pin_data_type(%{data_type: {t1, a1}} = p1, %{data_type: {t2, a2}} = p2) do
+    s1 = Pin.data_size(a1)
+    s2 = Pin.data_size(a2)
+    if t1 != t2 or s1 != s2 do
+      compile_error("The pins #{p1.id} and #{p2.id} has different types")
+    end
+  end
   defp assert_pin_data_type(%{data_type: t1} = p1, %{data_type: t2} = p2) do
     if t1 != t2 do
       compile_error("The pins #{p1.id} and #{p2.id} has different types")
