@@ -57,10 +57,14 @@ defmodule Cuda.Graph do
   def add(%__MODULE__{} = graph, id, module, opts \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
       proto = struct(Node.proto(module))
-      opts = id
-             |> graph.module.__child_options__(module, graph)
-             |> Keyword.merge(opts)
-      GraphProto.add(graph, Cuda.Graph.Factory.new(proto, id, module, opts, graph.assigns.env))
+      opts = case function_exported?(graph.module, :__child_options__, 3) do
+        true -> id
+                |> graph.module.__child_options__(module, graph)
+                |> Keyword.merge(opts)
+        _    -> opts
+      end
+      env = graph |> Map.get(:assigns, %{}) |> Map.get(:env, %Cuda.Env{})
+      GraphProto.add(graph, Cuda.Graph.Factory.new(proto, id, module, opts, env))
     else
       _ -> compile_error("Graph module #{module} could not be loaded")
     end
