@@ -5,6 +5,9 @@ defprotocol Cuda.Graph.Processing do
   @spec dfs(graph :: Graph.t, callback :: Graph.dfs_callback, state :: any) :: Graph.dfs_result
   def dfs(graph, callback, state)
 
+  @spec dfs_reverse(graph :: Graph.t, callback :: Graph.dfs_callback, state :: any) :: Graph.dfs_result
+  def dfs_reverse(graph, callback, state)
+
   @spec loop?(graph :: Graph.t) :: boolean
   def loop?(graph)
 
@@ -149,6 +152,91 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     {node, NodeProto.pin(node, pin)}
   end
 
+  # ----------------------------------------------------------------------------
+  # dfs_reverse
+  # ----------------------------------------------------------------------------
+  def dfs_reverse(graph, callback, state \\ %{})
+  def dfs_reverse(%Graph{} = graph, callback, state) do
+    st = %{graph: graph, nodes: [], callback: callback, state: state}
+    result =
+      graph
+      |> NodeProto.pins(output_pin_types())
+      |> Enum.reduce({:ok, st}, fn
+        %Pin{id: id}, {:ok, st} -> dfsr_search({:__self__, id}, {:ok, st})
+        _, result               -> result
+      end)
+    case result do
+      {:error, _} = err -> err
+      {action, st} -> {action, st.state}
+      result       -> compile_error("Unexpected result `#{inspect result}` returned from `dfs`")
+    end
+  end
+
+  defp dfsr_search(node_spec, {:ok, st}) do
+    # get node from graph by node_spec
+    node = dfs_node_pin_by_spec(st.graph, node_spec)
+
+    # yield callback if this is a first loopkup of node
+    result = if not node_spec in st.nodes do
+      with {:ok, st} <- dfs_yield(:enter, node, st) do
+        {:ok, %{st | nodes: [node_spec | st.nodes]}}
+      end
+    else
+      {:ok, st}
+    end
+
+    # find next available node or leave current if there are no nodes
+    with {:ok, st} <- result do
+      result = node_spec
+               |> dfsr_next_spec(st.graph)
+               |> Enum.reduce({:ok, st}, &dfsr_reducer/2)
+      with {:ok, st} <- result, do: dfs_yield(:leave, node, st)
+    end
+  end
+  defp dfsr_search(_, result), do: result
+
+  defp dfsr_next_spec({:__self__, pin} = node_spec, graph) do
+    case NodeProto.pin(graph, pin) do
+      %Pin{type: :output} -> [node_spec]
+      _                   -> []
+    end
+  end
+  defp dfsr_next_spec({node_id, _}, graph) do
+    case GraphProto.node(graph, node_id) do
+      nil ->
+        []
+      node ->
+        input_pin_types()
+        |> Enum.flat_map(& NodeProto.pins(node, &1))
+        |> Enum.map(& {node_id, &1.id})
+    end
+  end
+
+  defp dfsr_reducer(next, {:ok, st}) do
+    next = Enum.filter(st.graph.links, fn
+      {_, ^next} -> true
+      _          -> nil
+    end)
+    if next == [], do: compile_error("unconnected pin detected")
+    next |> Enum.reduce({:ok, st}, &dfsr_next_reducer/2)
+  end
+  defp dfsr_reducer(_next, result) do
+    result
+  end
+
+  defp dfsr_next_reducer({dst_spec, src_spec}, {:ok, st}) do
+    if not dst_spec in st.nodes do
+      src = dfs_node_pin_by_spec(st.graph, src_spec)
+      dst = dfs_node_pin_by_spec(st.graph, dst_spec)
+      with {:ok, st} <- dfs_yield(:move, {src, dst}, st) do
+        # recursion
+        dfsr_search(dst_spec, {:ok, st})
+      end
+    else
+      {:ok, st}
+    end
+  end
+  defp dfsr_next_reducer(_next, result), do: result
 
   # ----------------------------------------------------------------------------
   # loop?

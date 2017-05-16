@@ -79,7 +79,7 @@ defmodule Cuda.Graph do
       [src_pin] -> src_pin
       _         -> compile_error("Chain allowed only for graphs with single input")
     end
-    with %{nodes: [node]} <- add(graph, id, module, opts, env) do
+    with %{nodes: [node]} = graph <- add(graph, id, module, opts, env) do
       dst_pin = case NodeProto.pins(node, input_pin_types()) do
         [dst_pin] -> dst_pin
         _         -> compile_error("Chain can only be applied to nodes with single input")
@@ -92,7 +92,7 @@ defmodule Cuda.Graph do
       [src_pin] -> src_pin
       _         -> compile_error("Chain can only be applied after nodes with single output")
     end
-    with %{nodes: [dst_node | _]} <- add(graph, id, module, opts, env) do
+    with %{nodes: [dst_node | _]} = graph <- add(graph, id, module, opts, env) do
       dst_pin = case NodeProto.pins(dst_node, input_pin_types()) do
         [dst_pin] -> dst_pin
         _         -> compile_error("Chain can only be applied to nodes with single input")

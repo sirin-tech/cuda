@@ -75,6 +75,67 @@ defmodule Cuda.Graph.ProcessingTest do
     end
   end
 
+  describe "dfs_reverse" do
+    test "traverses graph" do
+      cb = fn
+        action, {{node1, _pin1}, {node2, _pin2}}, state -> {:ok, state ++ [{action, {node1.id, node2.id}}]}
+        action, {node, _pin}, state                     -> {:ok, state ++ [{action, node.id}]}
+      end
+
+      {:ok, result} = dfs_reverse(graph(:longest_chain_test), cb, [])
+      assert [enter: :graph, move: {:graph, :n}, enter: :n, move: {:n, :m},
+              enter: :m, move: {:m, :j}, enter: :j, move: {:j, :e}, enter: :e,
+              move: {:e, :c}, enter: :c, move: {:c, :a}, enter: :a,
+              move: {:a, :graph}, enter: :graph, leave: :graph, leave: :a,
+              leave: :c, leave: :e, move: {:j, :f}, enter: :f, move: {:f, :c},
+              enter: :c, leave: :c, leave: :f, leave: :j, leave: :m,
+              move: {:n, :k}, enter: :k, move: {:k, :g}, enter: :g, move: {:g, :c},
+              enter: :c, leave: :c, leave: :g, move: {:k, :h}, enter: :h,
+              move: {:h, :d}, enter: :d, move: {:d, :a}, enter: :a, leave: :a,
+              move: {:d, :b}, enter: :b, move: {:b, :graph}, enter: :graph,
+              leave: :graph, leave: :b, leave: :d, leave: :h, leave: :k, leave: :n,
+              leave: :graph, enter: :graph, move: {:graph, :o}, enter: :o,
+              move: {:o, :l}, enter: :l, move: {:l, :i}, enter: :i, move: {:i, :d},
+              enter: :d, leave: :d, leave: :i, leave: :l, leave: :o,
+              leave: :graph] = result
+
+      # [i]──▶[input (a) output]──▶[o]
+      {:ok, result} = dfs_reverse(graph(:i1_single1_o1), cb, [])
+      assert [enter: :g, move: {:g, :a}, enter: :a, move: {:a, :g},
+              enter: :g, leave: :g, leave: :a, leave: :g] = result
+
+      # [i]─┬─▶[input (a) output]──▶[o1]
+      #     └─▶[input (b) output]──▶[o2]
+      {:ok, result} = dfs_reverse(graph(:i1_single2_o2), cb, [])
+      assert [enter: :g, move: {:g, :a}, enter: :a, move: {:a, :g}, enter: :g,
+              leave: :g, leave: :a, leave: :g, enter: :g, move: {:g, :b},
+              enter: :b, leave: :b, leave: :g] = result
+
+      # [i1]──▶⎡input1 (a) output1⎤──▶[o1]
+      # [i2]──▶⎣input2     output2⎦──▶[o2]
+      {:ok, result} = dfs_reverse(graph(:i2_double1_o2), cb, [])
+      assert [enter: :g, move: {:g, :a}, enter: :a, move: {:a, :g}, enter: :g,
+              leave: :g, move: {:a, :g}, enter: :g, leave: :g, leave: :a,
+              leave: :g, enter: :g, move: {:g, :a}, enter: :a, leave: :a,
+              leave: :g] = result
+
+      # [i]──▶⎡input1 (a) output1⎤──▶[o]
+      #    ┌─▶⎣input2     output2⎦─┐
+      #    └───────────────────────┘
+      {:ok, result} = dfs_reverse(graph(:i1_double1_o1), cb, [])
+      assert [enter: :g, move: {:g, :a}, enter: :a, move: {:a, :g}, enter: :g,
+              leave: :g, move: {:a, :a}, enter: :a, leave: :a, leave: :a,
+              leave: :g] = result
+    end
+
+    test "raises on unconnected pins" do
+      # [i]──▶[input (a) output]─x─▶[o]
+      assert_raise(CompileError, fn ->
+        dfs_reverse(graph(:unconnected), fn _,_,st -> {:ok, st} end, [])
+      end)
+    end
+  end
+
   describe "topology_sort/1" do
     test "sorts nodes in topology order" do
       # [i]──▶[input (a) output]─┬──────────────────────▶[o1]

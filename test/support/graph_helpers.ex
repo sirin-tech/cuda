@@ -385,4 +385,17 @@ defmodule Cuda.Test.GraphHelpers do
       cnid == current_node_id and nnid == next_node_id
     end)
   end
+
+  def callback(action, args, state)
+  def callback(action, {{node1, _pin1}, {node2, _pin2}}, state) do
+    IO.puts("#{action}: #{node1.id} - #{node2.id}")
+    {:ok, state ++ [{action, {node1.id, node2.id}}]}
+  end
+  def callback(action, {node, _pin}, state) do
+    IO.puts("#{action}: #{node.id}")
+    {:ok, state ++ [{action, node.id}]}
+  end
+  def callback(action, args, _state) do
+    {action, args}
+  end
 end
