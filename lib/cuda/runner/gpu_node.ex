@@ -7,6 +7,32 @@ defimpl Cuda.Runner, for: Cuda.Graph.GPUNode do
     v |> List.flatten |> Enum.reduce(<<>>, & &2 <> <<&1::float-little-32>>)
   end
 
+  def load(%{assigns: assigns} = node, opts) do
+    with cuda when is_pid(cuda) <- Keyword.get(opts, :cuda) do
+      # load cubin into GPU
+      {:ok, module} = Cuda.module_load(cuda, assigns.cubin)
+      # load args into GPU
+      args = opts
+             |> Keyword.get(:args, %{})
+             |> Enum.reduce(%{}, fn
+               {k, {m, _} = loaded}, args when m in ~w(memory shared_memory)a ->
+                 Map.put(args, k, loaded)
+               {k, {type, value}}, args ->
+                 bin = Pin.pack(type, value)
+                 with {:ok, marg} <- Cuda.memory_load(cuda, bin) do
+                   Map.put(args, k, marg)
+                 else
+                   _ ->
+                     # TODO: warning here
+                     args
+                 end
+                _, args ->
+                  args
+             end)
+      {:ok, NodeProto.assign(node, cuda_module: module, cuda_args: args)}
+    end
+  end
+
   def run(%{assigns: assigns} = node, inputs, opts) do
     with cuda when is_pid(cuda) <- Keyword.get(opts, :cuda) do
       {pins, extracts} = Enum.reduce(assigns.offsets, {<<>>, %{}}, fn {k, offset}, {pins, extracts} ->
@@ -25,9 +51,10 @@ defimpl Cuda.Runner, for: Cuda.Graph.GPUNode do
       end)
 
       {:ok, mpins}  = Cuda.memory_load(cuda, pins)
-      {:ok, module} = Cuda.module_load(cuda, assigns.cubin)
 
-      args = Keyword.get(opts, :args, %{})
+      args = Map.merge(Map.get(assigns, :cuda_args, %{}),
+                       Keyword.get(opts, :args, %{}))
+
       batch = assigns.batch |> Enum.map(fn
         {name, k, b, params} ->
           params = Enum.map(params, & Map.get(args, &1))
@@ -38,7 +65,7 @@ defimpl Cuda.Runner, for: Cuda.Graph.GPUNode do
           x
       end)
 
-      :ok = Cuda.stream(cuda, module, batch)
+      :ok = Cuda.stream(cuda, assigns.cuda_module, batch)
       {:ok, o} = Cuda.memory_read(cuda, mpins)
 
       outputs = Enum.reduce(extracts, %{}, fn {k, extract}, acc ->

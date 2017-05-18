@@ -172,6 +172,13 @@ defmodule Cuda.Graph.Node do
       __MODULE__
     end
   end
+
+  def string_id(id) when is_tuple(id) do
+    id |> Tuple.to_list |> Enum.map(&string_id/1) |> Enum.join("__")
+  end
+  def string_id(id) do
+    "#{id}"
+  end
 end
 
 defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do

@@ -50,13 +50,24 @@ defmodule Cuda.Graph.Pin do
     if length(x) == arity do
       x |> Enum.map(& pack(&1, type)) |> Enum.join
     else
-      <<>>
+      raise RuntimeError, message: "Arity of array #{inspect x} should be #{arity}"
     end
   end
   def pack(x, types) when is_list(types) and is_list(x) and length(types) == length(x) do
     x
     |> Enum.zip(types)
     |> Enum.map(fn {x, type} -> pack(x, type) end)
+    |> Enum.join()
+  end
+  def pack(x, types) when is_map(types) and is_map(x) do
+    types
+    |> Enum.map(fn {k, type} ->
+      with {:ok, v} <- Map.fetch(x, k) do
+        pack(v, type)
+      else
+        _ -> raise RuntimeError, message: "Coudn't find value for key #{k}"
+      end
+    end)
     |> Enum.join()
   end
   def pack(_, _), do: <<>>
@@ -93,13 +104,24 @@ defmodule Cuda.Graph.Pin do
     list
   end
   def unpack(x, types) when is_list(types) do
-    types |> Enum.reduce({[], x}, fn
+    {list, _} = types |> Enum.reduce({[], x}, fn
       type, {list, rest} ->
         {data, rest} = unpack_list(rest, type)
         {list ++ data, rest}
       _, acc ->
         acc
     end)
+    list
+  end
+  def unpack(x, types) when is_map(types) do
+    {list, _} = types |> Enum.reduce({%{}, x}, fn
+      {k, type}, {map, rest} ->
+        {data, rest} = unpack_list(rest, type)
+        {Map.put(map, k, data), rest}
+      _, acc ->
+        acc
+    end)
+    list
   end
   def unpack(_, _), do: nil
 
@@ -128,29 +150,29 @@ defmodule Cuda.Graph.Pin do
   end
 
   @type_re ~r/(\d+)/
-  defp type_size(:i8),  do: 1
-  defp type_size(:i16), do: 2
-  defp type_size(:i32), do: 4
-  defp type_size(:i64), do: 8
-  defp type_size(:u8),  do: 1
-  defp type_size(:u16), do: 2
-  defp type_size(:u32), do: 4
-  defp type_size(:u64), do: 8
-  defp type_size(:f16), do: 2
-  defp type_size(:f32), do: 4
-  defp type_size(:f64), do: 8
-  defp type_size(type) when is_atom(type) or is_bitstring(type) do
+  def type_size(:i8),  do: 1
+  def type_size(:i16), do: 2
+  def type_size(:i32), do: 4
+  def type_size(:i64), do: 8
+  def type_size(:u8),  do: 1
+  def type_size(:u16), do: 2
+  def type_size(:u32), do: 4
+  def type_size(:u64), do: 8
+  def type_size(:f16), do: 2
+  def type_size(:f32), do: 4
+  def type_size(:f64), do: 8
+  def type_size(type) when is_atom(type) or is_bitstring(type) do
     case Regex.run(@type_re, "#{type}", capture: :all_but_first) do
       [n] -> div(String.to_integer(n), 8)
       _   -> 0
     end
   end
-  defp type_size(tuple) when is_tuple(tuple) do
+  def type_size(tuple) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list
     |> Enum.map(&type_size/1)
     |> Enum.reduce(1, &Kernel.*/2)
   end
-  defp type_size(i) when is_integer(i), do: i
-  defp type_size(_), do: 0
+  def type_size(i) when is_integer(i), do: i
+  def type_size(_), do: 0
 end

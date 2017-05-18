@@ -1,6 +1,7 @@
 defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
   alias Cuda.Template
   alias Cuda.Graph.NodeProto
+  alias Cuda.Graph.Node
 
   defmodule Helpers do
     use Bitwise
@@ -12,7 +13,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
     def kernel(ctx, name, body, opts \\ []) do
       params = [{:pins, :u64, [ptr: true]}] ++ Keyword.get(opts, :args, [])
       params = params |> Enum.map(&param/1) |> Enum.join(", ")
-      ".visible .entry #{ctx.node.id}__#{name} (#{params}) {\n" <>
+      ".visible .entry #{Node.string_id(ctx.node.id)}__#{name} (#{params}) {\n" <>
       body <>
       "\n}"
     end
@@ -116,6 +117,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
   alias Cuda.Compiler.GPUUnit
   alias Cuda.Graph.NodeProto
   alias Cuda.Graph.Pin
+  alias Cuda.Graph.Node
   require Logger
 
   def compile(node, ctx) do
@@ -128,8 +130,8 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
          {:ok, cubin} <- Compiler.compile(node.assigns.sources) do
       batch = node.module.__batch__(node)
               |> Enum.map(fn
-                {name, g, b, args} -> {"#{node.id}__#{name}", g, b, args}
-                {name, g, b}       -> {"#{node.id}__#{name}", g, b, []}
+                {name, g, b, args} -> {"#{Node.string_id(node.id)}__#{name}", g, b, args}
+                {name, g, b}       -> {"#{Node.string_id(node.id)}__#{name}", g, b, []}
               end)
       node = node
              |> NodeProto.assign(:cubin, cubin)

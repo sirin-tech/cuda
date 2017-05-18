@@ -34,15 +34,19 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
       end)
       graph = NodeProto.assign(graph, :pin_offsets, offsets)
 
-      state = {:ok, {graph, 0, size1, ctx, [], []}}
-      with {:ok, {_, _, _, _, sources, batch}} <- Enum.reduce(nodes, state, &collect_sources/2) do
-        graph = graph
-                |> NodeProto.assign(:sources, sources)
-                |> NodeProto.assign(:batch, batch)
-        {:ok, graph}
+      if Map.get(ctx.assigns, :compile_sources) != false do
+        state = {:ok, {graph, 0, size1, ctx, [], []}}
+        with {:ok, {_, _, _, _, sources, batch}} <- Enum.reduce(nodes, state, &collect_sources/2) do
+          graph = graph
+                  |> NodeProto.assign(:sources, sources)
+                  |> NodeProto.assign(:batch, batch)
+          {:ok, graph}
+        else
+          {:error, _} = error -> error
+          error               -> {:error, error}
+        end
       else
-        {:error, _} = error -> error
-        error               -> {:error, error}
+        {:ok, graph}
       end
     else
       error -> {:error, error}
@@ -79,8 +83,8 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     with {:ok, node} <- node.module.__compile__(node),
          {:ok, node} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
       node_batch = node.module.__batch__(node) |> Enum.map(fn
-                     {name, g, b, args} -> {"#{node.id}__#{name}", g, b, args}
-                     {name, g, b}       -> {"#{node.id}__#{name}", g, b, []}
+                     {name, g, b, args} -> {"#{Node.string_id(node.id)}__#{name}", g, b, args}
+                     {name, g, b}       -> {"#{Node.string_id(node.id)}__#{name}", g, b, []}
                    end)
       batch = batch ++ node_batch
       sources = sources ++ node.assigns.sources
@@ -105,9 +109,14 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   def compile(%{type: :computation_graph} = graph, ctx) do
     Logger.info("CUDA: Compiling GPU code for graph #{graph.module} (#{graph.id})")
     with {:ok, graph} <- graph.module.__compile__(graph),
-         {:ok, graph} <- GPUUnit.sources(graph, ctx),
-         {:ok, cubin} <- Compiler.compile(graph.assigns.sources) do
-      {:ok, NodeProto.assign(graph, :cubin, cubin)}
+         {:ok, graph} <- GPUUnit.sources(graph, ctx) do
+      if Map.get(ctx.assigns, :compile_sources) != false do
+        with {:ok, cubin} <- Compiler.compile(graph.assigns.sources) do
+          {:ok, NodeProto.assign(graph, :cubin, cubin)}
+        end
+      else
+        {:ok, graph}
+      end
     else
       _ ->
         Logger.warn("CUDA: Error while compiling GPU code for graph " <>

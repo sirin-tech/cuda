@@ -17,6 +17,9 @@ defprotocol Cuda.Graph.NodeProto do
 
   @spec assign(node :: struct, key :: atom, value :: any) :: struct
   def assign(node, key, value)
+
+  @spec assign(node :: struct, key :: map | keyword) :: struct
+  def assign(node, assigns)
 end
 
 defprotocol Cuda.Graph.GraphProto do
@@ -60,6 +63,11 @@ defimpl Cuda.Graph.NodeProto, for: Any do
 
   def assign(%{assigns: assigns} = node, key, value) do
     %{node | assigns: Map.put(assigns, key, value)}
+  end
+
+  def assign(%{assigns: assigns} = node, data) do
+    data = data |> Enum.into(%{})
+    %{node | assigns: Map.merge(assigns, data)}
   end
 end
 

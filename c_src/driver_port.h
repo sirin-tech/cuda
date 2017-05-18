@@ -23,6 +23,7 @@ protected:
   ETERM *MemoryLoad(RawData &data, size_t size);
   ETERM *MemoryLoad(ETERM *arg);
   ETERM *Stream(ETERM *arg);
+  ETERM *DeviceInfo();
 public:
   DriverPort(int device);
   ~DriverPort();

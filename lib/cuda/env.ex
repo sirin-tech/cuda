@@ -11,10 +11,11 @@ defmodule Cuda.Env do
   @type t :: %__MODULE__{
     float_size: float_size,
     int_size: int_size,
-    optimize: optimize
+    optimize: optimize,
+    gpu_info: keyword
   }
 
-  defstruct [:float_size, :int_size, :optimize]
+  defstruct [:float_size, :int_size, :optimize, gpu_info: []]
 
   @env_var "CUDA_ENV"
   @default %{

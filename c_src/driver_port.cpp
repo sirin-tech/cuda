@@ -69,6 +69,7 @@ ETERM *DriverPort::HandleTermFunction(std::string name, ETERM *arg) {
   if (name == "module_load") return ModuleLoad(arg);
   if (name == "run") return Run(arg);
   if (name == "stream") return Stream(arg);
+  if (name == "device_info") return DeviceInfo();
   return NULL;
 }
 
@@ -298,4 +299,130 @@ std::shared_ptr<RunArguments> DriverPort::UnpackRunArguments(ETERM *term) {
     }
   }
   return args;
+}
+
+ETERM *DriverPort::DeviceInfo() {
+  int v[44];
+  CUdevice_attribute c[44] = {
+    CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+    CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X,
+    CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y,
+    CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z,
+    CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X,
+    CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y,
+    CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z,
+    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK,
+    CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY,
+    CU_DEVICE_ATTRIBUTE_WARP_SIZE,
+    CU_DEVICE_ATTRIBUTE_MAX_PITCH,
+    CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_BLOCK,
+    CU_DEVICE_ATTRIBUTE_CLOCK_RATE,
+    CU_DEVICE_ATTRIBUTE_GPU_OVERLAP,
+    CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT,
+    CU_DEVICE_ATTRIBUTE_KERNEL_EXEC_TIMEOUT,
+    CU_DEVICE_ATTRIBUTE_INTEGRATED,
+    CU_DEVICE_ATTRIBUTE_CAN_MAP_HOST_MEMORY,
+    CU_DEVICE_ATTRIBUTE_COMPUTE_MODE,
+    CU_DEVICE_ATTRIBUTE_CONCURRENT_KERNELS,
+    CU_DEVICE_ATTRIBUTE_ECC_ENABLED,
+    CU_DEVICE_ATTRIBUTE_PCI_BUS_ID,
+    CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID,
+    CU_DEVICE_ATTRIBUTE_TCC_DRIVER,
+    CU_DEVICE_ATTRIBUTE_MEMORY_CLOCK_RATE,
+    CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH,
+    CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE,
+    CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR,
+    CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING,
+    CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+    CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
+    CU_DEVICE_ATTRIBUTE_GLOBAL_L1_CACHE_SUPPORTED,
+    CU_DEVICE_ATTRIBUTE_LOCAL_L1_CACHE_SUPPORTED,
+    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+    CU_DEVICE_ATTRIBUTE_MAX_REGISTERS_PER_MULTIPROCESSOR,
+    CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY,
+    CU_DEVICE_ATTRIBUTE_MULTI_GPU_BOARD,
+    CU_DEVICE_ATTRIBUTE_MULTI_GPU_BOARD_GROUP_ID,
+    CU_DEVICE_ATTRIBUTE_HOST_NATIVE_ATOMIC_SUPPORTED,
+    CU_DEVICE_ATTRIBUTE_SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO,
+    CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS,
+    CU_DEVICE_ATTRIBUTE_CONCURRENT_MANAGED_ACCESS,
+    CU_DEVICE_ATTRIBUTE_COMPUTE_PREEMPTION_SUPPORTED,
+    CU_DEVICE_ATTRIBUTE_CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM,
+  };
+  const char *b[18];
+  CUresult x;
+  CUdevice d = driver->GetHandle();
+  for (int i = 0; i < 44; i++) {
+    x = cuDeviceGetAttribute(&v[i], c[i], d);
+    if (x != CUDA_SUCCESS) throw DriverError(x);
+  }
+  b[0] = v[13] == 1 ? "true" : "false";
+  b[1] = v[15] == 1 ? "true" : "false";
+  b[2] = v[16] == 1 ? "true" : "false";
+  b[3] = v[17] == 1 ? "true" : "false";
+  b[4] = "unknown";
+  switch (v[18]) {
+    case CU_COMPUTEMODE_DEFAULT: b[4] = "default"; break;
+    case CU_COMPUTEMODE_PROHIBITED: b[4] = "prohibited"; break;
+    case CU_COMPUTEMODE_EXCLUSIVE_PROCESS: b[4] = "exclusive_process"; break;
+  }
+  b[5] = v[19] == 1 ? "true" : "false";
+  b[6] = v[20] == 1 ? "true" : "false";
+  b[7] = v[23] == 1 ? "true" : "false";
+  b[8] = v[28] == 1 ? "true" : "false";
+  b[9] = v[31] == 1 ? "true" : "false";
+  b[10] = v[32] == 1 ? "true" : "false";
+  b[11] = v[35] == 1 ? "true" : "false";
+  b[12] = v[36] == 1 ? "true" : "false";
+  b[13] = v[38] == 1 ? "true" : "false";
+  b[14] = v[40] == 1 ? "true" : "false";
+  b[15] = v[41] == 1 ? "true" : "false";
+  b[16] = v[42] == 1 ? "true" : "false";
+  b[17] = v[43] == 1 ? "true" : "false";
+  return FORMAT(
+    "{ok,["
+      "{max_threads_per_block,~i},"
+      "{max_block,{~i,~i,~i}},"
+      "{max_grid,{~i,~i,~i}},"
+      "{max_shared_memory_per_block,~i},"
+      "{total_constant_memory,~i},"
+      "{warp_size,~i},"
+      "{max_pitch,~i},"
+      "{max_registers_per_block,~i},"
+      "{clock_rate,~i},"
+      "{gpu_overlap,~a},"
+      "{miltiprocessor_count,~i},"
+      "{kernel_exec_timeout,~a},"
+      "{integrated,~a},"
+      "{can_map_host_memory,~a},"
+      "{compute_mode,~a},"
+      "{concurrent_kernels,~a},"
+      "{ecc_enabled,~a},"
+      "{pci_bus_id,~i},"
+      "{pci_device_id,~i},"
+      "{tcc_driver,~a},"
+      "{memory_clock_rate,~i},"
+      "{global_memory_bus_width,~i},"
+      "{l2_cache_size,~i},"
+      "{max_threads_per_multiprocessor,~i},"
+      "{unified_arressing,~a},"
+      "{compute_capability,{~i,~i}},"
+      "{global_l1_cache_supported,~a},"
+      "{glocal_l1_cache_supported,~a},"
+      "{max_shared_memory_per_multiprocessor,~i},"
+      "{max_registers_per_multiprocessor,~i},"
+      "{managed_memory,~a},"
+      "{multi_gpu_board,~a},"
+      "{multi_gpu_board_group_id,~i},"
+      "{host_native_atomic_supported,~a},"
+      "{single_to_double_precision_perf_ratio,~i},"
+      "{pageable_memory_access,~a},"
+      "{concurrent_managed_access,~a},"
+      "{compute_preemption_supported,~a},"
+      "{can_use_host_pointer_for_registered_mem,~a}"
+    "]}",
+    v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11],
+    v[12], b[0], v[14], b[1], b[2], b[3], b[4], b[5], b[6], v[21], v[22], b[7],
+    v[24], v[25], v[26], v[27], b[8], v[29], v[30], b[9], b[10], v[33], v[34],
+    b[11], b[12], v[37], b[13], v[39], b[14], b[15], b[16], b[17]);
 }

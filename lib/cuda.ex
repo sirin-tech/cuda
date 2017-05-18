@@ -119,6 +119,10 @@ defmodule Cuda do
     GenServer.call(pid, {:call, :info, info})
   end
 
+  def device_info(pid) do
+    GenServer.call(pid, {:call, :device_info, nil})
+  end
+
   def compile(pid, sources, opts \\ nil)
   def compile(pid, {:file, file}, opts) when is_binary(file) do
     with {:ok, source} <- File.read(file) do

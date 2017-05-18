@@ -8,6 +8,42 @@ defimpl Cuda.Runner, for: Cuda.Graph do
     v |> List.flatten |> Enum.reduce(<<>>, & &2 <> <<&1::float-little-32>>)
   end
 
+  def load(%{type: :computation_graph, assigns: assigns} = graph, opts) do
+    with cuda when is_pid(cuda) <- Keyword.get(opts, :cuda) do
+      # load cubin into GPU
+      {:ok, module} = Cuda.module_load(cuda, assigns.cubin)
+      # load args into GPU
+      args = opts
+             |> Keyword.get(:args, %{})
+             |> Enum.reduce(%{}, fn
+               {k, {m, _} = loaded}, args when m in ~w(memory shared_memory)a ->
+                 Map.put(args, k, loaded)
+               {k, {type, value}}, args ->
+                 bin = Pin.pack(type, value)
+                 with {:ok, marg} <- Cuda.memory_load(cuda, bin) do
+                   Map.put(args, k, marg)
+                 else
+                   _ ->
+                     # TODO: warning here
+                     args
+                 end
+                _, args ->
+                  args
+             end)
+      {:ok, NodeProto.assign(graph, cuda_module: module, cuda_args: args)}
+    end
+  end
+  def load(%{nodes: nodes} = graph, opts) do
+    nodes = nodes |> Enum.reduce([], fn node, nodes ->
+      with {:ok, loaded} <- Cuda.Runner.load(node, opts) do
+        [loaded] ++ nodes
+      else
+        _ -> [node] ++ nodes
+      end
+    end)
+    {:ok, %{graph | nodes: nodes}}
+  end
+
   def run(%{type: :computation_graph, assigns: assigns} = graph, inputs, opts) do
     with cuda when is_pid(cuda) <- Keyword.get(opts, :cuda) do
       # get input and convert it to binary
@@ -16,11 +52,11 @@ defimpl Cuda.Runner, for: Cuda.Graph do
       # form pins layout
       size = assigns.pin_size - byte_size(i)
       pins = i <> <<0::unit(8)-size(size)>>
-      # load pins and cubin into GPU
-      {:ok, mpins}  = Cuda.memory_load(cuda, pins)
-      {:ok, module} = Cuda.module_load(cuda, assigns.cubin)
+      # load pins into GPU
+      {:ok, mpins} = Cuda.memory_load(cuda, pins)
       # prepare arguments and batch list
-      args = Keyword.get(opts, :args, %{})
+      args = Map.merge(Map.get(assigns, :cuda_args, %{}),
+                       Keyword.get(opts, :args, %{}))
       batch = assigns.batch |> Enum.map(fn
         {name, k, b, params} ->
           params = Enum.map(params, & Map.get(args, &1))
@@ -31,7 +67,8 @@ defimpl Cuda.Runner, for: Cuda.Graph do
           x
       end)
       # run computation on GPU
-      :ok = Cuda.stream(cuda, module, batch)
+      #IO.inspect({assigns.cuda_module, batch})
+      :ok = Cuda.stream(cuda, assigns.cuda_module, batch)
       {:ok, o} = Cuda.memory_read(cuda, mpins)
       # extract output
       output = NodeProto.pins(graph, output_pin_types()) |> List.first

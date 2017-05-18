@@ -144,6 +144,7 @@ private:
 public:
   Driver(int deviceNo);
   ~Driver();
+  CUdevice GetHandle() { return device; }
   int Compile(std::list<std::string> sources, LinkerOptions &options);
   int LoadModule(std::string cubin, LinkerOptions &options);
   int LoadMemory(const void *src, size_t size);
