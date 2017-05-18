@@ -36,6 +36,10 @@ defprotocol Cuda.Graph.Processing do
   """
   @spec precompile_wrap(graph :: Cuda.Graph.t, node_type :: Cuda.Graph.Node.type) :: Cuda.Graph.t
   def precompile_wrap(graph, node_type \\ :gpu)
+
+  # unwrap(graph) если внутри только один граф то ф-я делает из графа в графе - единственный граф
+  def flat(graph)
+  # reverse(graph)
 end
 
 defimpl Cuda.Graph.Processing, for: Cuda.Graph do
@@ -651,5 +655,33 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> GraphProto.add(nested)
     |> move(nested_id, chain)
     |> prc_wrap(rest)
+  end
+
+  #-----------------------------------------------------------------------------
+  #flat
+  #-----------------------------------------------------------------------------
+  def flat(%Cuda.Graph{nodes: [%Cuda.Graph{} = ngraph]} = graph) do
+    {pins, pin_ids} = ngraph.pins
+    |> Enum.reduce({[], %{}}, fn
+      pin, {pins, pin_ids} ->
+        id = f_find_id(graph, pin)
+        {[%{pin | id: id} | pins], Map.put(pin_ids, pin.id, id)}
+    end)
+    links = Enum.map(ngraph.links, fn
+      {{:__self__, id}, part} -> {{:__self__, pin_ids[id]}, part}
+      {part, {:__self__, id}} -> {part, {:__self__, pin_ids[id]}}
+      link                    -> link
+    end)
+    %{ngraph | id: graph.id, pins: pins, links: links}
+  end
+  def flat(graph), do: graph
+
+  defp f_find_id(%{links: links}, %{id: id}) do
+    links
+    |> Enum.reduce_while(nil, fn
+      {{:__self__, name}, {_, ^id}}, _ -> {:halt, name}
+      {{_, ^id}, {:__self__, name}}, _ -> {:halt, name}
+      _, _                             -> {:cont, nil}
+    end)
   end
 end
