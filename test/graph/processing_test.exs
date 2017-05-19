@@ -378,4 +378,24 @@ defmodule Cuda.Graph.ProcessingTest do
       assert nodes == chains
     end
   end
+
+  describe "flat/1" do
+    test "Flattens graph with one graph node" do
+      g = graph(:i1_single3_o1)
+      flatten = g
+      |> precompile_wrap(:virtual)
+      |> Processing.flat()
+      assert g.id    == flatten.id
+      assert g.links == flatten.links
+      assert g.nodes == flatten.nodes
+    end
+
+    test "Graph consists of more than one node" do
+      g = graph(:i1_single3_o1)
+      g = %{g | nodes: List.update_at(g.nodes, 0, &(%{&1 | type: :gpu}))}
+      |> precompile_wrap(:virtual)
+      flatten = Processing.flat(g)
+      assert g == flatten
+    end
+  end
 end

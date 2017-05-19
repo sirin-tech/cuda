@@ -37,9 +37,11 @@ defprotocol Cuda.Graph.Processing do
   @spec precompile_wrap(graph :: Cuda.Graph.t, node_type :: Cuda.Graph.Node.type) :: Cuda.Graph.t
   def precompile_wrap(graph, node_type \\ :gpu)
 
-  # unwrap(graph) если внутри только один граф то ф-я делает из графа в графе - единственный граф
+  @doc """
+  Flattens graph, if it consists of one graph node
+  """
+  @spec flat(graph :: Cuda.Graph.t) :: Cuda.Graph.t
   def flat(graph)
-  # reverse(graph)
 end
 
 defimpl Cuda.Graph.Processing, for: Cuda.Graph do
