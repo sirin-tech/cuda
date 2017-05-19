@@ -96,7 +96,7 @@ defmodule Cuda.Graph.Node do
       def __assigns__(_opts, _env), do: %{}
       def __proto__(), do: unquote(__MODULE__)
       def __compile__(node), do: {:ok, node}
-      defoverridable __assigns__: 2, __proto__: 0, __compile__: 1
+      defoverridable __assigns__: 2, __compile__: 1, __proto__: 0
     end
   end
 

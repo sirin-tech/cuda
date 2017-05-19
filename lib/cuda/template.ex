@@ -72,6 +72,10 @@ defmodule Cuda.Template do
   end
   defp get_macros(module) do
     macros = module.__info__(:macros)
+    #macros = case module do
+    #  Kernel -> macros |> Enum.reject(fn {n, _} -> n == :@ end)
+    #  _      -> macros
+    #end
     {:ok, {module, macros}}
   end
 end

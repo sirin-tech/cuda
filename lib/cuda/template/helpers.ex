@@ -18,4 +18,11 @@ defmodule Cuda.Template.Helpers do
   def var(ctx, var_name) do
     get_in(ctx.vars, [var_name])
   end
+
+  #defmacro @(var_name) do
+  #  IO.inspect(var_name)
+  #  quote do
+  #    # get_in(var!(ctx).vars, [unquote(var_name)]) |> IO.inspect
+  #  end
+  #end
 end
