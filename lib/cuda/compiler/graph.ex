@@ -10,7 +10,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
 
   def sources(%{type: :computation_graph, id: gid} = graph, ctx) do
     # temporary guard to deny graph with multiple inputs and outputs
-    # remove it when multiple io will be suuported by runner
+    # remove it when multiple io will be supported by runner
     if length(NodeProto.pins(graph, input_pin_types())) > 1 do
       raise CompileError, description: "Multiple inputs are not supported"
     end
@@ -127,8 +127,11 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   def compile(graph, ctx) do
     Logger.info("CUDA: Compiling graph #{graph.module} (#{graph.id})")
     with {:ok, graph}    <- graph.module.__compile__(graph),
+         Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/source.svg"),
          %{} = graph     <- Processing.expand(graph),
+         Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/expanded.svg"),
          %{} = graph     <- Processing.precompile_wrap(graph),
+         Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/wrapped.svg"),
          %{} = graph     <- topology_sort(graph),
          {:ok, _, nodes} <- Enum.reduce(graph.nodes, {:ok, ctx, []}, &compile_reducer/2) do
       assigns = Enum.reduce(nodes, graph.assigns, fn

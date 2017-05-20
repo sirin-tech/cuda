@@ -63,7 +63,7 @@ defmodule Cuda.Worker do
   end
 
   defp load_shared(graph, st, opts) do
-    with {:ok, shared} <- collect_shared(graph),
+    with {:ok, shared} <- collect_shared(graph),# |> IO.inspect,
          {:ok, shared} <- make_shared(shared, Keyword.get(opts, :shared, %{})),
          # load shared variables
          {:ok, _} <- Shared.load(st.shared_pid, shared),

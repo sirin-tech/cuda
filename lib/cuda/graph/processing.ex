@@ -99,12 +99,12 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   defp dfs_search(_, result), do: result
 
   defp dfs_reducer(next, {:ok, st}) do
-    next = Enum.filter(st.graph.links, fn
+    links = Enum.filter(st.graph.links, fn
       {^next, _} -> true
       _          -> nil
     end)
-    if next == [], do: compile_error("unconnected pin detected")
-    next |> Enum.reduce({:ok, st}, &dfs_next_reducer/2)
+    if links == [], do: compile_error("unconnected pin detected: #{inspect next}")
+    links |> Enum.reduce({:ok, st}, &dfs_next_reducer/2)
   end
   defp dfs_reducer(_next, result) do
     result
@@ -411,7 +411,10 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       []
     else
       graph = lc_graph_update(graph, lchain)
-      [lchain | longest_chain(graph, node_type)]
+      tail = longest_chain(graph, node_type)
+      [lchain | tail] |> Cuda.Test.GraphHelpers.nodes2ids() |> IO.inspect(label: :LC)
+      #[lchain | longest_chain(graph, node_type)]
+      [lchain | tail]
     end
   end
 
