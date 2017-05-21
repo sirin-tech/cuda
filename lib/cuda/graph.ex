@@ -56,6 +56,12 @@ defmodule Cuda.Graph do
 
   def add(%__MODULE__{} = graph, id, module, opts \\ []) do
     with {:module, module} <- Code.ensure_loaded(module) do
+      if id == graph.id do
+        compile_error("The id `#{id}` of newly added node is already used by graph")
+      end
+      if GraphProto.node(graph, id) != nil do
+        compile_error("Node with id `#{id}` s already exists in the graph")
+      end
       proto = struct(Node.proto(module))
       opts = case function_exported?(graph.module, :__child_options__, 3) do
         true -> id

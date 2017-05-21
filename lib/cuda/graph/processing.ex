@@ -2,8 +2,8 @@ defprotocol Cuda.Graph.Processing do
   alias Cuda.Graph
   alias Cuda.Graph.Pin
 
-  @spec dfs(graph :: Graph.t, callback :: Graph.dfs_callback, state :: any) :: Graph.dfs_result
-  def dfs(graph, callback, state)
+  @spec dfs(graph :: Graph.t, callback :: Graph.dfs_callback, state :: any, opts :: keyword) :: Graph.dfs_result
+  def dfs(graph, callback, state \\ %{}, opts \\ [])
 
   @spec dfs_reverse(graph :: Graph.t, callback :: Graph.dfs_callback, state :: any) :: Graph.dfs_result
   def dfs_reverse(graph, callback, state)
@@ -22,6 +22,12 @@ defprotocol Cuda.Graph.Processing do
   """
   @spec longest_chain(graph :: Graph.t, node_type :: Node.type) :: [[Graph.Node.t]]
   def longest_chain(graph, node_type \\ :gpu)
+
+  @doc """
+  Finds longest path in the graph
+  """
+  @spec longest_path(graph :: Graph.t) :: [{Graph.id, Graph.id}]
+  def longest_path(graph)
 
   @doc """
   Move node from source graph into destination graph, when destination graph
@@ -58,9 +64,13 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # ----------------------------------------------------------------------------
   # dfs
   # ----------------------------------------------------------------------------
-  def dfs(graph, callback, state \\ %{})
-  def dfs(%Graph{} = graph, callback, state) do
-    st = %{graph: graph, nodes: [], callback: callback, state: state}
+  def dfs(graph, callback, state \\ %{}, opts \\ [])
+  def dfs(%Graph{} = graph, callback, state, opts) do
+    st = %{graph: graph,
+           nodes: [],
+           callback: callback,
+           state: state,
+           ids: Keyword.get(opts, :ids, false)}
     result =
       graph
       |> NodeProto.pins(input_pin_types())
@@ -77,7 +87,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp dfs_search(node_spec, {:ok, st}) do
     # get node from graph by node_spec
-    node = dfs_node_pin_by_spec(st.graph, node_spec)
+    node = dfs_node_pin_by_spec(st, node_spec)
 
     # yield callback if this is a first loopkup of node
     result = if not node_spec in st.nodes do
@@ -112,8 +122,8 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp dfs_next_reducer({src_spec, dst_spec}, {:ok, st}) do
     if not dst_spec in st.nodes do
-      src = dfs_node_pin_by_spec(st.graph, src_spec)
-      dst = dfs_node_pin_by_spec(st.graph, dst_spec)
+      src = dfs_node_pin_by_spec(st, src_spec)
+      dst = dfs_node_pin_by_spec(st, dst_spec)
       with {:ok, st} <- dfs_yield(:move, {src, dst}, st) do
         # recursion
         dfs_search(dst_spec, {:ok, st})
@@ -150,10 +160,11 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     end
   end
 
-  defp dfs_node_pin_by_spec(graph, {:__self__, pin}) do
+  defp dfs_node_pin_by_spec(%{ids: true}, spec), do: spec
+  defp dfs_node_pin_by_spec(%{graph: graph}, {:__self__, pin}) do
     {graph, NodeProto.pin(graph, pin)}
   end
-  defp dfs_node_pin_by_spec(graph, {node, pin}) do
+  defp dfs_node_pin_by_spec(%{graph: graph}, {node, pin}) do
     node = GraphProto.node(graph, node)
     {node, NodeProto.pin(node, pin)}
   end
@@ -180,7 +191,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp dfsr_search(node_spec, {:ok, st}) do
     # get node from graph by node_spec
-    node = dfs_node_pin_by_spec(st.graph, node_spec)
+    node = dfs_node_pin_by_spec(st, node_spec)
 
     # yield callback if this is a first loopkup of node
     result = if not node_spec in st.nodes do
@@ -232,8 +243,8 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp dfsr_next_reducer({dst_spec, src_spec}, {:ok, st}) do
     if not dst_spec in st.nodes do
-      src = dfs_node_pin_by_spec(st.graph, src_spec)
-      dst = dfs_node_pin_by_spec(st.graph, dst_spec)
+      src = dfs_node_pin_by_spec(st, src_spec)
+      dst = dfs_node_pin_by_spec(st, dst_spec)
       with {:ok, st} <- dfs_yield(:move, {src, dst}, st) do
         # recursion
         dfsr_search(dst_spec, {:ok, st})
@@ -411,10 +422,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       []
     else
       graph = lc_graph_update(graph, lchain)
-      tail = longest_chain(graph, node_type)
-      [lchain | tail] |> Cuda.Test.GraphHelpers.nodes2ids() |> IO.inspect(label: :LC)
-      #[lchain | longest_chain(graph, node_type)]
-      [lchain | tail]
+      [lchain | longest_chain(graph, node_type)]
     end
   end
 
@@ -478,18 +486,20 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     end)
   end
 
-  defp lc_check_inputs?(nil, _, _), do: true
-  defp lc_check_inputs?(%{id: pid}, %{id: cid} = cnode, %{links: links}) do
-    inpins = cnode
-    |> NodeProto.pins(input_pin_types())
-    |> length()
-    links
-    |> Enum.filter(fn
-      {{^pid, _}, {^cid, _}} -> true
-      _                      -> false
-    end)
-    |> length() == inpins
-  end
+  # NOTE: We are temporary disable 2-inputs rule in longest chain
+  defp lc_check_inputs?(_, _, _), do: true
+  #defp lc_check_inputs?(nil, _, _), do: true
+  #defp lc_check_inputs?(%{id: pid}, %{id: cid} = cnode, %{links: links}) do
+  #  inpins = cnode
+  #  |> NodeProto.pins(input_pin_types())
+  #  |> length()
+  #  links
+  #  |> Enum.filter(fn
+  #    {{^pid, _}, {^cid, _}} -> true
+  #    _                      -> false
+  #  end)
+  #  |> length() == inpins
+  #end
 
   defp lc_graph_update(graph, []), do: graph
   defp lc_graph_update(graph, [node | rest]) do
@@ -498,6 +508,33 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     graph = %{graph | nodes: nodes}
     lc_graph_update(graph, rest)
   end
+
+  #-----------------------------------------------------------------------------
+  # longest_path
+  #-----------------------------------------------------------------------------
+  def longest_path(%{links: links}) do
+    links
+    |> Enum.filter(&input_link?/1)
+    |> Enum.map(& longest_path(links, [], &1))
+    |> Enum.sort_by(&length/1)
+    |> List.last
+  end
+  defp longest_path(_, path, {_, {:__self__, _}} = link) do
+    path ++ [link]
+  end
+  defp longest_path(links, path, {_, {dst, _}} = link) do
+    links
+    |> Enum.filter(fn
+      {{^dst, _}, _} -> true
+      _              -> false
+    end)
+    |> Enum.map(& longest_path(links, path ++ [link], &1))
+    |> Enum.sort_by(&length/1)
+    |> List.last
+  end
+
+  defp input_link?({{:__self__, _}, _}), do: true
+  defp input_link?(_), do: false
 
   #-----------------------------------------------------------------------------
   # move

@@ -27,6 +27,19 @@ defprotocol Cuda.Graph.GraphProto do
   def add(graph, node)
 
   @doc """
+  Replaces node in the graph.
+
+  If the node to replace have same id as a replaced node, you can call this
+  function with two arguments - graph and the node to replace. If you need to
+  replace node which id is different from replacing node id, pass id of node
+  to replace as second argument and replacement node as a third argument.
+  """
+  @spec replace(graph :: Graph.t, node :: Node.t) :: Graph.t
+  @spec replace(graph :: Graph.t, id :: Graph.id, node :: Node.t) :: Graph.t
+  def replace(graph, node)
+  def replace(graph, id, node)
+
+  @doc """
   Returns node in the graph by its name
   """
   @spec node(graph :: Graph.t, id :: Graph.id) :: Node.t
@@ -81,6 +94,21 @@ defimpl Cuda.Graph.GraphProto, for: Any do
     else
       _ -> compile_error("Node with id `#{id}` is already in the graph")
     end
+  end
+
+  def replace(%{nodes: nodes} = graph, %{id: id} = node) do
+    nodes = nodes |> Enum.map(fn
+      %{id: ^id} -> node
+      x          -> x
+    end)
+    %{graph | nodes: nodes}
+  end
+  def replace(%{nodes: nodes} = graph, id, node) do
+    nodes = nodes |> Enum.map(fn
+      %{id: ^id} -> node
+      x          -> x
+    end)
+    %{graph | nodes: nodes}
   end
 
   def node(%{nodes: nodes}, id) do

@@ -19,16 +19,16 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
 
   defp gen_ptx(text) do
     node = new_node(text)
-    ctx = %{context() | assigns: %{offsets: [i: 0, o: 2]}}
+    ctx = %{context() | assigns: %{pin_offsets: [i: 0, o: 2]}}
     {:ok, %{assigns: %{sources: [{:ptx, ptx}]}}} = GPUUnit.sources(node, ctx)
     parse_ptx(ptx)
   end
 
   describe "offset/2" do
     test "returns pin offset" do
-      ptx = gen_ptx(~s{<%= offset(ctx, :i) %>})
+      ptx = gen_ptx(~s{<%= pin_offset(ctx, :i) %>})
       assert ptx == ["0"]
-      ptx = gen_ptx(~s{<%= offset(ctx, :o) %>})
+      ptx = gen_ptx(~s{<%= pin_offset(ctx, :o) %>})
       assert ptx == ["2"]
     end
   end

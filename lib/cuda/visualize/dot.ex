@@ -11,7 +11,7 @@ defmodule Cuda.Graph.Visualize.Dot do
     File.write(file, gv)
     out = Keyword.get(opts, :output, "#{n}.svg")
     System.cmd("dot", ["-Tsvg", file, "-o", out])
-    #File.rm_rf!(file)
+    File.rm_rf!(file)
   end
 
   defp render_node(node, parent_id \\ nil) do
@@ -72,7 +72,6 @@ defmodule Cuda.Graph.Visualize.Dot do
 
   defp render_links(%{id: gid} = node, parent_id \\ nil) do
     id = node_id(node.id, parent_id)
-    IO.inspect({parent_id, gid, id})
     result = Processing.dfs(node, fn
       :enter, {%{nodes: _} = src, _}, st ->
         if node_id(src.id, parent_id) in st.nodes do

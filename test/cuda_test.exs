@@ -58,10 +58,10 @@ defmodule Cuda.CudaTest do
       {:ok, module} = Cuda.compile(cuda, [ptx1, ptx2])
 
       # x[i] = x[i] + 2 - 1 + 2 - 1
-      batch = [{"ptx1", {8, 1, 1}, {1, 1, 1}, [input, output]},
-               {"ptx2", {8, 1, 1}, {1, 1, 1}, [output, input]},
-               {"ptx1", {8, 1, 1}, {1, 1, 1}, [input, output]},
-               {"ptx2", {8, 1, 1}, {1, 1, 1}, [output, input]}]
+      batch = [[{:run, {"ptx1", {8, 1, 1}, {1, 1, 1}, [input, output]}},
+                {:run, {"ptx2", {8, 1, 1}, {1, 1, 1}, [output, input]}},
+                {:run, {"ptx1", {8, 1, 1}, {1, 1, 1}, [input, output]}},
+                {:run, {"ptx2", {8, 1, 1}, {1, 1, 1}, [output, input]}}]]
       :ok = Cuda.stream(cuda, module, batch)
       {:ok, result} = Cuda.memory_read(cuda, input)
       assert result == <<3::little-32, 4::little-32, 5::little-32, 6::little-32,

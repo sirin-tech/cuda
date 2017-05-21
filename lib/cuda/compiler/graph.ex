@@ -6,53 +6,83 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   alias Cuda.Graph.Processing
   alias Cuda.Compiler.GPUUnit
 
+  require Integer
+  require Cuda
+  import Integer, only: [is_odd: 1]
+  import Cuda, only: [compile_error: 1]
   import Node, only: [input_pin_types: 0, output_pin_types: 0]
+  import Cuda.Compiler.Utils
 
-  def sources(%{type: :computation_graph, id: gid} = graph, ctx) do
-    # temporary guard to deny graph with multiple inputs and outputs
-    # remove it when multiple io will be supported by runner
-    if length(NodeProto.pins(graph, input_pin_types())) > 1 do
-      raise CompileError, description: "Multiple inputs are not supported"
-    end
-    if length(NodeProto.pins(graph, output_pin_types())) > 1 do
-      raise CompileError, description: "Multiple outputs are not supported"
-    end
-
-    with {:ok, nodes} <- Processing.topology_sort(graph) do
-      nodes = nodes
-              |> Enum.map(fn {node, _pin} -> node end)
-              |> Enum.reject(& &1 == gid)
-      {_, size1, size2} = nodes
-                          |> Enum.with_index
-                          |> Enum.reduce({graph, 0, 0}, &collect_sizes/2)
-      graph = NodeProto.assign(graph, :pin_size, size1 + size2)
-
-      offset = if rem(length(nodes), 2) == 0, do: 0, else: size1
-      offsets = graph.pins |> Enum.reduce(%{}, fn
-        %{id: id, type: type}, acc when type in input_pin_types() -> Map.put(acc, id, 0)
-        %{id: id, type: type}, acc when type in output_pin_types() -> Map.put(acc, id, offset)
-      end)
-      graph = NodeProto.assign(graph, :pin_offsets, offsets)
-
-      if Map.get(ctx.assigns, :compile_sources) != false do
-        state = {:ok, {graph, 0, size1, ctx, [], []}}
-        with {:ok, {_, _, _, _, sources, batch}} <- Enum.reduce(nodes, state, &collect_sources/2) do
-          graph = graph
-                  |> NodeProto.assign(:sources, sources)
-                  |> NodeProto.assign(:batch, batch)
-          {:ok, graph}
-        else
-          {:error, _} = error -> error
-          error               -> {:error, error}
-        end
-      else
-        {:ok, graph}
-      end
-    else
-      error -> {:error, error}
-    end
+  def sources(%{type: :computation_graph} = graph, ctx) do
+    chains = graph
+             |> collect_chains()
+             |> Enum.map(& collect_sizes(&1, graph))
+    graph = graph
+            |> collect_offsets(chains)
+            |> put_pins_shapes()
+            |> collect_sources(ctx)
+            |> collect_batches(chains)
+    #IO.inspect(graph.assigns)
+    #Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/t.svg")
+    {:ok, graph}
   end
   def sources(graph, _), do: {:ok, graph}
+
+  defp collect_chains(graph) do
+    longest_chain = graph |> Processing.longest_path()
+    longest = longest_chain |> Enum.map(&Tuple.to_list/1) |> List.flatten
+    inputs = graph |> NodeProto.pins(input_pin_types()) |> Enum.map(& &1.id)
+    st = %{chains: [longest_chain], visited: [], longest: longest}
+    result = Processing.dfs(graph, fn
+      # graph input
+      :enter, {:__self__, pin} = src, st ->
+        cond do
+          # if not an input - skip
+          not pin in inputs -> {:ok, st}
+          # if already in longest chain - skip it
+          src in st.longest -> {:ok, st}
+          # if node not in longest chain - start new chain
+          true -> {:ok, %{st | chains: [[] | st.chains]}}
+        end
+      # move from one node to another
+      :move, {{src_node, _} = src, dst} = link, %{chains: [chain | chains]} = st ->
+        cond do
+          # if link already in longest - skip it
+          src in st.longest or dst in st.longest ->
+            {:ok, st}
+          # if we move from already visited node then this node have more that
+          # one output and we should start new chain
+          src_node in st.visited ->
+            {:ok, %{st | chains: [[link] | st.chains]}}
+          # add link to current chain
+          true ->
+            {:ok, %{st | chains: [[link | chain] | chains],
+                         visited: [src_node | st.visited]}}
+        end
+      _, _, st ->
+        {:ok, st}
+    end, st, ids: true)
+    with {:ok, st} <- result do
+      st.chains
+      |> Enum.reverse
+      |> Enum.map(& %{links: &1, size1: 0, size2: 0})
+    end
+  end
+
+  defp collect_sizes(%{links: links} = chain, graph) do
+    links
+    |> Enum.map(fn
+      {{:__self__, pin}, _} ->
+        graph |> NodeProto.pin(pin) |> Pin.data_size()
+      {{node, pin}, _} ->
+        graph |> GraphProto.node(node) |> NodeProto.pin(pin) |> Pin.data_size()
+    end)
+    |> Enum.with_index
+    |> Enum.reduce(chain, fn
+      {n, i}, chain when is_odd(i) -> %{chain | size2: max(n, chain.size2)}
+      {n, _}, chain                -> %{chain | size1: max(n, chain.size1)}
+    end)
+  end
 
   defp collect_sizes({node, idx}, {graph, s1, s2}) do
     node = GraphProto.node(graph, node)
@@ -71,30 +101,175 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     {graph, Enum.max([s1, size1]), Enum.max([s2, size2])}
   end
 
-  defp collect_sources(node, {:ok, {graph, offset1, offset2, ctx, sources, batch}}) do
-    node = GraphProto.node(graph, node)
-    {offsets, _} = node
-                   |> NodeProto.pins(input_pin_types())
-                   |> Enum.reduce({%{}, offset1}, &collect_offsets/2)
-    {offsets, _} = node
-                   |> NodeProto.pins(output_pin_types())
-                   |> Enum.reduce({offsets, offset2}, &collect_offsets/2)
-    assigns = Map.put(ctx.assigns, :offsets, offsets)
-    with {:ok, node} <- node.module.__compile__(node),
-         {:ok, node} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
-      node_batch = node.module.__batch__(node) |> Enum.map(fn
-                     {name, g, b, args} -> {"#{Node.string_id(node.id)}__#{name}", g, b, args}
-                     {name, g, b}       -> {"#{Node.string_id(node.id)}__#{name}", g, b, []}
-                   end)
-      batch = batch ++ node_batch
-      sources = sources ++ node.assigns.sources
-      {:ok, {graph, offset2, offset1, ctx, sources, batch}}
+  defp collect_sources(graph, ctx) do
+    graph.nodes |> Enum.reduce(graph, fn node, graph ->
+      offsets = node.assigns.pin_offsets
+      assigns = Map.put(ctx.assigns, :pin_offsets, offsets)
+      with {:ok, node} <- node.module.__compile__(node),
+           {:ok, node} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
+        id = Node.string_id(node.id)
+        batch = node.module.__batch__(node) |> Enum.map(fn
+          {:run, {name, g, b, args}} -> {:run, {"#{id}__#{name}", g, b, args}}
+          {:run, {name, g, b}}       -> {:run, {"#{id}__#{name}", g, b, []}}
+        end)
+        sources = Map.get(graph.assigns, :sources, []) ++ node.assigns.sources
+        node = NodeProto.assign(node, :batch, batch)
+        graph
+        |> NodeProto.assign(:sources, sources)
+        |> GraphProto.replace(node)
+      else
+        _ -> graph
+      end
+    end)
+  end
+
+  defp collect_offsets(%{} = graph, chains) do
+    {graph, _} = chains |> Enum.reduce({graph, 0}, fn chain, {graph, chain_offset} ->
+      state = {graph, chain_offset, chain_offset + chain.size1}
+      {graph, _, _} = chain.links |> Enum.reduce(state, fn
+        {{:__self__, src_pin}, {dst, dst_pin}}, {graph, o1, o2} ->
+          node = GraphProto.node(graph, dst) |> put_offset(dst_pin, o1)
+          graph = graph |> put_offset(src_pin, o1) |> GraphProto.replace(node)
+          {graph, o2, o1}
+        {{src, src_pin}, {:__self__, dst_pin}}, {graph, o1, o2} ->
+          node = GraphProto.node(graph, src) |> put_offset(src_pin, o1)
+          graph = graph |> put_offset(dst_pin, o1) |> GraphProto.replace(node)
+          {graph, o2, o1}
+        {{:__self__, src_pin}, {:__self__, dst_pin}}, {graph, o1, o2} ->
+          graph = graph |> put_offset(src_pin, o1) |> put_offset(dst_pin, o1)
+          {graph, o2, o1}
+        {{src, src_pin}, {dst, dst_pin}}, {graph, o1, o2} ->
+          src = GraphProto.node(graph, src) |> put_offset(src_pin, o1)
+          dst = GraphProto.node(graph, dst) |> put_offset(dst_pin, o1)
+          graph = graph |> GraphProto.replace(src) |> GraphProto.replace(dst)
+          {graph, o2, o1}
+      end)
+      pin_size = chain.size1 + chain.size2
+      size = Map.get(graph.assigns, :pin_size, 0) + pin_size
+      {graph |> NodeProto.assign(:pin_size, size), chain_offset + pin_size}
+    end)
+    graph
+  end
+
+  defp collect_batches(graph, chains) do
+    batches = chains |> Enum.map(fn
+      %{links: [{{:__self__, _}, {dst, _}} = link]} ->
+        [{:copy, link}, {:event, Node.string_id(dst)}]
+      %{links: [{{:__self__, _}, _} | links]} ->
+        batch = reduce_batches([], links, graph, chains)
+        add_final_event(batch, links)
+      %{links: [{{node_id, _}, _} | links]} ->
+        batch = case dependency(chains, node_id) do
+          nil    -> compile_error("Can't find dependency for node #{node_id}")
+          dep_id -> [{:wait, dep_id}]
+        end
+        reduce_batches(batch, links, graph, chains)
+        add_final_event(batch, links)
+    end)
+    {batches, sources} = batches |> Enum.map_reduce([], fn batch, sources ->
+      batch |> Enum.map_reduce(sources, fn
+        {:copy, link}, sources ->
+          {name, ptx, size} = copy_ptx(graph, link)
+          {{:run, {name, {1, 1, 1}, {size, 1, 1}, []}}, [{:ptx, ptx} | sources]}
+        batch, sources -> {batch, sources}
+      end)
+    end)
+    sources = Map.get(graph.assigns, :sources, []) ++ sources
+    NodeProto.assign(graph, batches: batches, sources: sources)
+  end
+
+  defp copy_ptx(graph, {src, dst}) do
+    {src_offset, pin} = case src do
+      {:__self__, pin} ->
+        {graph.assigns.pin_offsets[pin], NodeProto.pin(graph, pin)}
+      {node, pin} ->
+        node = GraphProto.node(graph, node)
+        {node.assigns.pin_offsets[pin], NodeProto.pin(node, pin)}
+    end
+    dst_offset = case dst do
+      {:__self__, pin} ->
+        graph.assigns.pin_offsets[pin]
+      {node, pin} ->
+        node = GraphProto.node(graph, node)
+        node.assigns.pin_offsets[pin]
+    end
+    type = Pin.data_type(pin)
+    size = Pin.data_size(pin)
+    type_size = div(size, Pin.data_arity(pin))
+    name = "copy_#{UUID.uuid1()}" |> String.replace("-", "")
+    ptx = """
+    .version 5.0
+    .target sm_30
+    .address_size 64
+    .visible .entry #{name} (.param .u64 .ptr pins) {
+      .reg .u64 %pins, %out;
+      .reg .u32 %x;
+      .reg .#{type} %f;
+      ld.param.u64 %pins, [pins];
+      mov.u32 %x, %ctaid.x;
+      mad.wide.u32 %pins, %x, #{type_size}, %pins;
+      add.u64 %out, %pins, #{type_size * dst_offset};
+      add.u64 %pins, %pins, #{type_size * src_offset};
+      ld.global.#{type} %f, [%pins];
+      st.global.#{type} [%out], %f;
+      ret;
+    }
+    """# |> IO.puts
+    {name, ptx, Pin.data_arity(pin)}
+  end
+
+  defp reduce_batches(batch, links, graph, chains) do
+    links |> Enum.reduce(batch, fn {{node_id, _}, _}, batch ->
+      deps = chains |> dependencies(node_id) |> Enum.map(& {:wait, &1})
+      node = GraphProto.node(graph, node_id)
+      batch = batch ++ deps ++ Map.get(node.assigns, :batch, [])
+      case chains |> dependend(node_id) do
+        []   -> batch
+        list -> batch ++ Enum.map(list, & {:copy, &1}) ++ [{:event, Node.string_id(node_id)}]
+      end
+    end)
+  end
+
+  defp add_final_event(batch, links) do
+    with {_, {:__self__, _}} <- links |> List.last do
+      batch
+    else
+      {_, {node_id, _}} = link ->
+        batch ++ [{:copy, link}, {:event, Node.string_id(node_id)}]
     end
   end
-  defp collect_sources(_, error), do: error
 
-  defp collect_offsets(pin, {offsets, offset}) do
-    {Map.put(offsets, pin.id, offset), offset + Pin.data_size(pin)}
+  defp dependencies(chains, node_id) do
+    chains |> Enum.reduce([], fn %{links: links}, chains ->
+      with {_, {^node_id, _}} <- List.last(links) do
+        chains ++ [Node.string_id(node_id)]
+      else
+        _ -> chains
+      end
+    end)
+  end
+
+  defp dependency(chains, node_id) do
+    chains |> Enum.find_value(fn
+      %{links: [{{^node_id, _}, _} | _]} -> false
+      %{links: links} ->
+        Enum.find_value(links, fn
+          {{^node_id, _}, _} -> Node.string_id(node_id)
+          _                  -> false
+        end)
+    end)
+  end
+
+  defp dependend(chains, node_id) do
+    chains |> Enum.reduce([], fn
+      {%{links: [{{^node_id, _} = src, dst} | _]}, _}, list -> [{dst, src} | list]
+      _, list -> list
+    end)
+  end
+
+  defp put_offset(%{assigns: assigns} = node, pin, offset) do
+    offsets = assigns |> Map.get(:pin_offsets, %{}) |> Map.put(pin, offset)
+    NodeProto.assign(node, :pin_offsets, offsets)
   end
 end
 

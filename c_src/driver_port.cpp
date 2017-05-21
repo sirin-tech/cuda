@@ -1,6 +1,7 @@
 #include "driver_port.h"
 #include "utils.h"
 #include "driver.h"
+#include "commands.h"
 
 template <> LinkerOptions DriverPort::Unpack<LinkerOptions>(ETERM *term) {
   LinkerOptions options;
@@ -151,71 +152,14 @@ ETERM *DriverPort::Run(ETERM *arg) {
   if (!ERL_IS_TUPLE(arg)) throw StringError("Bad argument");
   auto argc = erl_size(arg);
   if (argc < 2) throw StringError("Bad argument");
-  auto moduleTerm = erl_element(1, arg);
-  auto funcTerm   = erl_element(2, arg);
-  if (!ERL_IS_BINARY(funcTerm)) throw StringError("Bad argument");
+  auto moduleTerm  = erl_element(1, arg);
+  auto commandTerm = erl_element(2, arg);
 
   auto module = GetModuleIndex(moduleTerm);
-  std::string func((char *)ERL_BIN_PTR(funcTerm), erl_size(funcTerm));
-  int gx = 1, gy = 1, gz = 1;
-  int bx = 1, by = 1, bz = 1;
-  std::shared_ptr<RunArguments> argsPtr;
-
-  if (argc > 2) {
-    ETERM *grid = NULL;
-    ETERM *block = NULL;
-    ETERM *params = NULL;
-
-    if (argc == 3) {
-      params = erl_element(3, arg);
-      if (ERL_IS_TUPLE(params) || ERL_IS_INTEGER(params)) {
-        block = params;
-        params = NULL;
-      }
-    } else if (argc == 4) {
-      block = erl_element(3, arg);
-      params = erl_element(4, arg);
-      if (ERL_IS_TUPLE(params) || ERL_IS_INTEGER(params)) {
-        grid = params;
-        params = NULL;
-      }
-    } else if (argc == 5) {
-      block  = erl_element(3, arg);
-      grid   = erl_element(4, arg);
-      params = erl_element(5, arg);
-    } else {
-      throw StringError("Bad argument");
-    }
-
-    if (block) {
-      if (ERL_IS_INTEGER(block)) {
-        bx = Get<int>(block);
-      } else if (ERL_IS_TUPLE(block)) {
-        auto s = erl_size(block);
-        if (s > 0) bx = Get<int>(erl_element(1, block));
-        if (s > 1) by = Get<int>(erl_element(2, block));
-        if (s > 2) bz = Get<int>(erl_element(3, block));
-      } else {
-        throw StringError("Bad argument");
-      }
-    }
-    if (grid) {
-      if (ERL_IS_INTEGER(grid)) {
-        bx = Get<int>(grid);
-      } else if (ERL_IS_TUPLE(grid)) {
-        auto s = erl_size(grid);
-        if (s > 0) gx = Get<int>(erl_element(1, grid));
-        if (s > 1) gy = Get<int>(erl_element(2, grid));
-        if (s > 2) gz = Get<int>(erl_element(3, grid));
-      } else {
-        throw StringError("Bad argument");
-      }
-    }
-    argsPtr = params ? UnpackRunArguments(params) : NULL;
-  }
-
-  auto params = std::make_tuple(func, gx, gy, gz, bx, by, bz);
-  driver->Run(module, params, argsPtr);
+  Commands::Context ctx;
+  ctx.module = driver->GetModule(module);
+  auto cmd = Commands::Command::Create(driver, commandTerm);
+  cmd->Run(ctx);
   DEBUG("Leave DriverPort::Run");
   return erl_mk_atom(OK_STR);
 }
@@ -225,45 +169,16 @@ ETERM *DriverPort::Stream(ETERM *arg) {
   if (!ERL_IS_TUPLE(arg)) throw StringError("Bad argument");
   auto argc = erl_size(arg);
   if (argc < 2) throw StringError("Bad argument");
-  auto moduleTerm = erl_element(1, arg);
-  auto batchTerm  = erl_element(2, arg);
-  if (!ERL_IS_LIST(batchTerm)) throw StringError("Bad argument");
+  auto moduleTerm  = erl_element(1, arg);
+  auto commandTerm = erl_element(2, arg);
+  if (!ERL_IS_LIST(commandTerm)) throw StringError("Bad argument");
 
   auto module = GetModuleIndex(moduleTerm);
-  std::vector<RunEnvironment> batch;
+  Commands::Context ctx;
+  ctx.module = driver->GetModule(module);
+  auto cmd = Commands::Command::Create(driver, commandTerm);
+  cmd->Run(ctx);
 
-  auto s = erl_length(batchTerm);
-  for (int i = 0; i < s; i++) {
-    auto item = erl_hd(batchTerm);
-    batchTerm = erl_tl(batchTerm);
-
-    if (!ERL_IS_TUPLE(item)) throw StringError("Bad argument");
-    if (erl_size(item) != 4) throw StringError("Bad argument");
-    auto funcTerm = erl_element(1, item);
-    auto bTerm    = erl_element(2, item);
-    auto gTerm    = erl_element(3, item);
-    auto argsTerm = erl_element(4, item);
-
-    std::string func((char *)ERL_BIN_PTR(funcTerm), erl_size(funcTerm));
-
-    if (!ERL_IS_TUPLE(bTerm)) throw StringError("Bad argument");
-    if (erl_size(bTerm) != 3) throw StringError("Bad argument");
-    auto bx = ERL_INT_VALUE(erl_element(1, bTerm));
-    auto by = ERL_INT_VALUE(erl_element(2, bTerm));
-    auto bz = ERL_INT_VALUE(erl_element(3, bTerm));
-
-    if (!ERL_IS_TUPLE(gTerm)) throw StringError("Bad argument");
-    if (erl_size(gTerm) != 3) throw StringError("Bad argument");
-    auto gx = ERL_INT_VALUE(erl_element(1, gTerm));
-    auto gy = ERL_INT_VALUE(erl_element(2, gTerm));
-    auto gz = ERL_INT_VALUE(erl_element(3, gTerm));
-
-    auto args = UnpackRunArguments(argsTerm);
-    auto params = std::make_tuple(func, gx, gy, gz, bx, by, bz);
-    batch.push_back(std::make_tuple(params, args));
-  }
-
-  driver->Stream(module, batch);
   return erl_mk_atom(OK_STR);
 }
 

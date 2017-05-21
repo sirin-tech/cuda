@@ -8,13 +8,13 @@ defmodule Cuda.Compiler.ComputationGraphTest do
   defmodule Node1 do
     use Cuda.Graph.GPUNode
     def __pins__(_), do: [input(:i, :i16), output(:o, :i32)]
-    def __ptx__(_), do: "node1-<%= offset(ctx, :i) %>-<%= offset(ctx, :o) %>"
+    def __ptx__(_), do: "node1-<%= pin_offset(ctx, :i) %>-<%= pin_offset(ctx, :o) %>"
   end
 
   defmodule Node2 do
     use Cuda.Graph.GPUNode
     def __pins__(_), do: [input(:i, :i32), output(:o, :i64)]
-    def __ptx__(_), do: "node2-<%= offset(ctx, :i) %>-<%= offset(ctx, :o) %>"
+    def __ptx__(_), do: "node2-<%= pin_offset(ctx, :i) %>-<%= pin_offset(ctx, :o) %>"
   end
 
   describe "sources/2" do
@@ -30,7 +30,7 @@ defmodule Cuda.Compiler.ComputationGraphTest do
               |> Cuda.Graph.link({:node1, :o}, {:node2, :i})
               |> Cuda.Graph.link({:node2, :o}, :go)
       {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(graph, ctx)
-      assert sources == [{:ptx, "node1-0-4"}, {:ptx, "node2-4-0"}]
+      assert sources == [{:ptx, "node2-8-0"}, {:ptx, "node1-0-8"}]
     end
   end
 end

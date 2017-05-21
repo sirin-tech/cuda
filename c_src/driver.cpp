@@ -49,6 +49,11 @@ int Driver::LoadModule(std::string cubin, LinkerOptions &options) {
   return moduleNo;
 }
 
+CUmodule Driver::GetModule(int id) {
+  auto module = modules.find(id);
+  if (module == modules.end()) return NULL;
+  return module->second;
+}
 
 int Driver::LoadMemory(const void *src, size_t size) {
   DeviceMemory *mem = new DeviceMemory(src, size);

@@ -5,9 +5,36 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
 
   defmodule Helpers do
     use Bitwise
+    require Logger
 
-    def offset(ctx, name) do
-      get_in(ctx.assigns, [:offsets, name])
+    def pin_offset(ctx, name) do
+      with nil <- get_in(ctx.assigns, [:pin_offsets, name]) do
+        Logger.warn("Can't find offset for pin `#{name}` of node `#{ctx.node.id}`")
+        nil
+      end
+    end
+
+    def shared_offset(ctx, name) do
+      offsets = ctx.assigns.shared_offsets
+      with nil <- find_shared_offset(ctx.node.id, name, offsets),
+           nil <- find_shared_offset(ctx.node.assigns[:alias], name, offsets) do
+        Logger.warn("Can't find offset for shared `#{name}` of node `#{ctx.node.id}`")
+        #Logger.warn("Avaialable shares are: #{inspect offsets}")
+        nil
+      end
+    end
+
+    defp find_shared_offset(nil, _, _), do: nil
+    defp find_shared_offset(id, name, offsets) do
+      id
+      |> Node.string_id()
+      |> String.split("__")
+      |> Enum.reduce([], fn
+        part, []               -> [[part]]
+        part, [path | _] = acc -> [(path ++ [part]) | acc]
+      end)
+      |> Enum.map(& Enum.join(&1, "__"))
+      |> Enum.find_value(& offsets[name][&1])
     end
 
     def kernel(ctx, name, body, opts \\ []) do
@@ -120,18 +147,22 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
   alias Cuda.Graph.Node
   require Logger
 
+  import Cuda.Compiler.Utils
+
   def compile(node, ctx) do
     Logger.info("CUDA: Compiling GPU code for node #{node.module} (#{node.id})")
     with {:ok, node}  <- node.module.__compile__(node),
-         %{} = node   <- assign_pin_sizes(node),
          %{} = node   <- assign_offsets(node),
-         ctx = %{ctx | assigns: Map.put(ctx.assigns, :offsets, node.assigns.offsets)},
+         %{} = node   <- put_pins_shapes(node),
+         ctx = %{ctx | assigns: Map.put(ctx.assigns, :pin_offsets, node.assigns.pin_offsets)},
          {:ok, node}  <- GPUUnit.sources(node, ctx),
          {:ok, cubin} <- Compiler.compile(node.assigns.sources) do
       batch = node.module.__batch__(node)
               |> Enum.map(fn
-                {name, g, b, args} -> {"#{Node.string_id(node.id)}__#{name}", g, b, args}
-                {name, g, b}       -> {"#{Node.string_id(node.id)}__#{name}", g, b, []}
+                {:run, {name, g, b, args}} ->
+                  {:run, {"#{Node.string_id(node.id)}__#{name}", g, b, args}}
+                {:run, {name, g, b}} ->
+                  {:run, {"#{Node.string_id(node.id)}__#{name}", g, b, []}}
               end)
       node = node
              |> NodeProto.assign(:cubin, cubin)
@@ -145,15 +176,10 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
     end
   end
 
-  defp assign_pin_sizes(%{pins: pins} = node) do
-    sizes = pins |> Enum.map(& {&1.id, Pin.data_size(&1)}) |> Enum.into(%{})
-    NodeProto.assign(node, :pin_sizes, sizes)
-  end
-
-  defp assign_offsets(%{assigns: %{offsets: o}} = node) when is_map(o), do: node
-  defp assign_offsets(%{assigns: %{pin_sizes: sizes}} = node) do
-    {offsets, _} = Enum.reduce(sizes, {%{}, 0}, fn {k, size}, {offsets, offset} ->
-      {Map.put(offsets, k, offset), offset + size}
+  defp assign_offsets(%{pins: pins} = node) do
+    {offsets, _} = Enum.reduce(pins, {%{}, 0}, fn pin, {offsets, offset} ->
+      size = Pin.data_size(pin)
+      {Map.put(offsets, pin.id, offset), offset + size}
     end)
     NodeProto.assign(node, :offsets, offsets)
   end

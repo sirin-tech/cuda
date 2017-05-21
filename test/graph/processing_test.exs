@@ -205,7 +205,8 @@ defmodule Cuda.Graph.ProcessingTest do
       assert :longest_chain_test
       |> graph()
       |> longest_chain(:gpu)
-      |> normalize() == [1, 1, 1, 2, 2]
+      # NOTE: We are temporary disable 2-inputs rule in longest chain
+      |> normalize() == [2, 2, 3] # [1, 1, 1, 2, 2]
 
       # [i1]──▶⎡input1 (a) output1⎤──▶[o1]
       # [i2]──▶⎣input2     output2⎦──▶[o2]
