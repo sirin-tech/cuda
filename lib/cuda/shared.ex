@@ -117,6 +117,7 @@ defmodule Cuda.Shared do
   end
 
   defp load_vars(vars, st) do
+    #IO.inspect({vars, st})
     {extracts, bin} = Enum.reduce(vars, {%{}, <<>>}, fn
       {k, {type, value}}, {vars, bin} ->
         value = Pin.pack(value, type)

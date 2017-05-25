@@ -9,9 +9,21 @@
 
 namespace Commands {
 
+class Events {
+public:
+  Events() { DEBUG("Events created"); }
+  ~Events();
+  CUevent Get(std::string name);
+private:
+  std::map<std::string, CUevent> events;
+};
+
 struct Context {
-  CUmodule module;
-  CUstream stream;
+  std::string id;
+  CUmodule    module;
+  CUstream    stream;
+  Events      *events = NULL;
+  std::string finishEvent;
 };
 
 class Command {
@@ -56,17 +68,21 @@ private:
   std::shared_ptr<RunArguments> arguments;
 };
 
-// class EventCommand: public Command {
-// public:
-//   EventCommand(Driver *driver, ETERM *args);
-//   virtual void Run(Context &ctx);
-// };
-//
-// class WaitCommand: public Command {
-// public:
-//   WaitCommand(Driver *driver, ETERM *args);
-//   virtual void Run(Context &ctx);
-// };
+class EventCommand: public Command {
+public:
+  EventCommand(Driver *driver, ETERM *args);
+  virtual void Run(Context &ctx);
+private:
+  std::string name;
+};
+
+class WaitCommand: public Command {
+public:
+  WaitCommand(Driver *driver, ETERM *args);
+  virtual void Run(Context &ctx);
+private:
+  std::string name;
+};
 
 } // namespace Commands
 #endif // __COMMANDS_H__

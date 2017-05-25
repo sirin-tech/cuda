@@ -628,6 +628,9 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
       {_, {^nid, pnid}}, acc          -> [NodeProto.pin(node, pnid) | acc]
       _, acc                       -> acc
     end)
+    # NOTE: added by alexiss. In some cases (training graph) without `Enum.uniq`
+    #       produces duplicate pins
+    |> Enum.uniq
   end
 
   defp mv_shared_links(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
@@ -680,12 +683,14 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   end
 
   #-----------------------------------------------------------------------------
-  #precompile_wrap
+  # precompile_wrap
   #-----------------------------------------------------------------------------
   def precompile_wrap(graph, node_type \\ :gpu) do
     Code.ensure_loaded(Graph.ComputationGraph)
     chains = graph
     |> longest_chain(node_type)
+    # TODO: we should not use code from test helpers in production.
+    #       Move here code from Cuda.Test.GraphHelpers.nodes2ids()
     |> Cuda.Test.GraphHelpers.nodes2ids()
     prc_wrap(graph, chains)
   end
@@ -700,7 +705,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   end
 
   #-----------------------------------------------------------------------------
-  #flat
+  # flat
   #-----------------------------------------------------------------------------
   def flat(%Cuda.Graph{nodes: [%Cuda.Graph{} = ngraph]} = graph) do
     {pins, pin_ids} = ngraph.pins

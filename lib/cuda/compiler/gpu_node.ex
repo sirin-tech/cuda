@@ -16,9 +16,12 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
 
     def shared_offset(ctx, name) do
       offsets = ctx.assigns.shared_offsets
+                |> Enum.map(fn {k, v} -> {Node.string_id(k), v} end)
+                |> Enum.into(%{})
       with nil <- find_shared_offset(ctx.node.id, name, offsets),
            nil <- find_shared_offset(ctx.node.assigns[:alias], name, offsets) do
-        Logger.warn("Can't find offset for shared `#{name}` of node `#{ctx.node.id}`")
+        id = Node.string_id(ctx.node.id)
+        Logger.warn("Can't find offset for shared `#{name}` of node `#{id}`")
         #Logger.warn("Avaialable shares are: #{inspect offsets}")
         nil
       end
@@ -26,15 +29,18 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
 
     defp find_shared_offset(nil, _, _), do: nil
     defp find_shared_offset(id, name, offsets) do
-      id
-      |> Node.string_id()
-      |> String.split("__")
+      IO.inspect(offsets)
+      #[_ | id] =
+        id
+                 |> Node.string_id()
+                 |> String.split("__")
       |> Enum.reduce([], fn
         part, []               -> [[part]]
         part, [path | _] = acc -> [(path ++ [part]) | acc]
       end)
       |> Enum.map(& Enum.join(&1, "__"))
-      |> Enum.find_value(& offsets[name][&1])
+      |> IO.inspect
+      |> Enum.find_value(& offsets[&1][name]) #[name][&1])
     end
 
     def kernel(ctx, name, body, opts \\ []) do

@@ -4,6 +4,7 @@ defmodule Cuda.Graph.Pin do
   """
 
   alias Cuda.Graph
+  require Logger
 
   @type type :: :input | :output | :producer | :consumer
 
@@ -97,6 +98,9 @@ defmodule Cuda.Graph.Pin do
   def pack(:zero, types) when is_map(types) do
     types |> Enum.map(fn {_, type} -> pack(:zero, type) end) |> Enum.join()
   end
+  def pack(nil, type) do
+    Logger.warn("Attempt to pack `nil` value for type #{inspect type}")
+  end
   def pack(_, _), do: <<>>
 
   def unpack(<<x>>, :i8), do: x
@@ -178,7 +182,7 @@ defmodule Cuda.Graph.Pin do
   end
   defp unpack_list(x, type) do
     size = type_size(type)
-    #IO.inspect({x, type, size})
+    #IO.inspect({x, type, size, byte_size(x)})
     <<x::binary-size(size), rest::binary>> = x
     {[unpack(x, type)], rest}
   end

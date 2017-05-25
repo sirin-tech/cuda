@@ -2,6 +2,27 @@
 
 namespace Commands {
 
+CUevent Events::Get(std::string name) {
+  CUevent event;
+  CUresult result;
+  auto eventIt = events.find(name);
+  if (eventIt == events.end()) {
+    result = cuEventCreate(&event, CU_EVENT_DISABLE_TIMING);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "Event creation");
+    events.insert(std::pair<std::string, CUevent>(name, event));
+  } else {
+    event = eventIt->second;
+  }
+  return event;
+}
+
+Events::~Events() {
+  DEBUG("Events destroyed");
+  for (auto it = events.begin(); it != events.end(); ++it) {
+    cuEventDestroy(it->second);
+  }
+}
+
 Command *Command::Create(Driver *driver, ETERM *item) {
   if (ERL_IS_LIST(item)) {
     if (erl_length(item) == 0) return new Batch(driver, item);
@@ -15,6 +36,10 @@ Command *Command::Create(Driver *driver, ETERM *item) {
   if (!ERL_IS_ATOM(cmd)) throw StringError("Bad argument");
   if (ATOM_EQ(cmd, "run")) {
     return new RunCommand(driver, args);
+  } else if (ATOM_EQ(cmd, "event")) {
+    return new EventCommand(driver, args);
+  } else if (ATOM_EQ(cmd, "wait")) {
+    return new WaitCommand(driver, args);
   } else {
     throw StringError("Bad command");
   }
@@ -35,15 +60,18 @@ void Batch::Run(Context &ctx) {
   result = cuStreamCreate(&ctx.stream, CU_STREAM_NON_BLOCKING);
   if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_create");
 
+  if (!ctx.events) ctx.events = new Events();
+
+  DEBUG("Starting stream " << ctx.id);
+
   for (auto it = commands.begin(); it != commands.end(); ++it) {
     Command *cmd = *it;
     cmd->Run(ctx);
   }
-  // DEBUG("Wait DriverPort::Stream");
-  result = cuStreamSynchronize(ctx.stream);
-  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_wait");
-  result = cuStreamDestroy(ctx.stream);
-  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_free");
+
+  result = cuEventRecord(ctx.events->Get(ctx.finishEvent), ctx.stream);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Event record");
+  DEBUG("Finishing stream " << ctx.id);
 }
 
 BatchList::BatchList(Driver *driver, ETERM *args) : Command(driver) {
@@ -56,11 +84,37 @@ BatchList::BatchList(Driver *driver, ETERM *args) : Command(driver) {
 }
 
 void BatchList::Run(Context &ctx) {
+  DEBUG("Running batch list");
+  if (!ctx.events) ctx.events = new Events();
+  std::vector<Context> ctxs;
+  int idx = 0;
   for (auto it = batches.begin(); it != batches.end(); ++it) {
     Command *cmd = *it;
     Context batchCtx = ctx;
+    batchCtx.id = std::to_string(idx);
+    batchCtx.finishEvent = std::string("finish") + batchCtx.id;
     cmd->Run(batchCtx);
+    ctxs.push_back(batchCtx);
+    idx++;
   }
+  // wait for all streams
+  CUstream batchStream;
+  CUresult result;
+  result = cuStreamCreate(&batchStream, CU_STREAM_NON_BLOCKING);
+  DEBUG("Waiting streams");
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_create");
+  for (auto it = ctxs.begin(); it != ctxs.end(); ++it) {
+    result = cuStreamWaitEvent(it->stream, ctx.events->Get(it->finishEvent), 0);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_create");
+    DEBUG("Stream " << it->id << " finished");
+    result = cuStreamDestroy(it->stream);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_free");
+  }
+  result = cuStreamSynchronize(batchStream);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_wait");
+  DEBUG("All streams finished");
+  result = cuStreamDestroy(batchStream);
+  if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:stream_free");
 }
 
 RunCommand::RunCommand(Driver *driver, ETERM *args) : Command(driver) {
@@ -167,6 +221,26 @@ void RunCommand::Run(Context &ctx) {
   // DEBUG("Exit DriverPort::Stream");
   if (result != CUDA_SUCCESS) throw DriverError(result, "Driver:execution");
   // DEBUG("Exit 1 DriverPort::Stream");
+}
+
+EventCommand::EventCommand(Driver *driver, ETERM *arg) : Command(driver) {
+  if (!ERL_IS_BINARY(arg)) throw StringError("Invalid argument");
+  name = std::string((char *)ERL_BIN_PTR(arg), erl_size(arg));
+}
+
+void EventCommand::Run(Context &ctx) {
+  auto event = ctx.events->Get(name);
+  cuEventRecord(event, ctx.stream);
+}
+
+WaitCommand::WaitCommand(Driver *driver, ETERM *arg) : Command(driver) {
+  if (!ERL_IS_BINARY(arg)) throw StringError("Invalid argument");
+  name = std::string((char *)ERL_BIN_PTR(arg), erl_size(arg));
+}
+
+void WaitCommand::Run(Context &ctx) {
+  auto event = ctx.events->Get(name);
+  cuStreamWaitEvent(ctx.stream, event, 0);
 }
 
 } // namespace Commands

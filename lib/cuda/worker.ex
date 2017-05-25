@@ -5,7 +5,7 @@ defmodule Cuda.Worker do
   alias Cuda.Graph.Node
   alias Cuda.Graph.GPUNode
   alias Cuda.Graph.Factory
-  alias Cuda.Graph.Processing
+  #alias Cuda.Graph.Processing
   alias Cuda.Compiler.Unit
   alias Cuda.Compiler.Context
   alias Cuda.Runner
@@ -63,7 +63,7 @@ defmodule Cuda.Worker do
   end
 
   defp load_shared(graph, st, opts) do
-    with {:ok, shared} <- collect_shared(graph),# |> IO.inspect,
+    with %{} = shared  <- collect_shared(graph),
          {:ok, shared} <- make_shared(shared, Keyword.get(opts, :shared, %{})),
          # load shared variables
          {:ok, _} <- Shared.load(st.shared_pid, shared),
@@ -78,13 +78,19 @@ defmodule Cuda.Worker do
   end
 
   defp make_shared(shared, values) do
+    IO.inspect({shared, values})
     shared = shared |> Enum.reduce(%{}, fn {k, types}, m ->
       v = values
-          |> Map.get(k, %{})
-          |> Enum.map(fn {k, v} -> {Node.string_id(k), v} end)
-          |> Enum.into(%{})
+          #|> Map.get(k, %{})
+          |> Enum.reduce(%{}, fn {name, values}, acc ->
+            case Map.get(values, k) do
+              nil -> acc
+              values -> Map.put(acc, name, values)
+            end
+          end)
+          #|> Enum.into(%{})
       Map.put(m, k, {types, v})
-    end)
+    end) |> IO.inspect
     case length(Map.keys(shared)) do
       0 -> :empty_shared
       _ -> {:ok, shared}
@@ -99,37 +105,43 @@ defmodule Cuda.Worker do
     end)
   end
 
-  defp nest_shared(shared, id, nested) do
-    nested |> Enum.reduce(shared, fn {key, values}, shared ->
-      values = values
-               |> Enum.map(fn {nid, v} -> {Node.string_id({id, nid}), v} end)
-               |> Enum.into(%{})
-      Map.put(shared, key, Map.merge(Map.get(shared, key, %{}), values))
-    end)
-  end
+  #defp nest_shared(shared, id, nested) do
+  #  nested |> Enum.reduce(shared, fn {key, values}, shared ->
+  #    values = values
+  #             |> Enum.map(fn {nid, v} -> {Node.string_id({id, nid}), v} end)
+  #             |> Enum.into(%{})
+  #    Map.put(shared, key, Map.merge(Map.get(shared, key, %{}), values))
+  #  end)
+  #end
 
   defp collect_shared(graph, root \\ true)
   defp collect_shared(%GPUNode{id: id, assigns: %{shared: shared}}, _) do
     {:ok, merge_shared(%{}, id, shared)}
   end
-  defp collect_shared(%{id: gid} = graph, root) do
-    Processing.dfs(graph, fn
-      :enter, {%{id: ^gid, assigns: assigns}, _}, st ->
-        if root do
-          {:ok, merge_shared(st, gid, Map.get(assigns, :shared))}
-        else
-          {:ok, st}
-        end
-      :enter, {%Graph{id: id, assigns: assigns} = g, _}, st ->
-        id = Node.string_id(id)
-        with shared <- merge_shared(st, id, Map.get(assigns, :shared)),
-             {:ok, nested} <- collect_shared(g, false) do
-          {:ok, nest_shared(shared, id, nested)}
-        end
-      :enter, {%GPUNode{id: id, assigns: %{shared: shared}}, _}, st ->
-        {:ok, merge_shared(st, id, shared)}
-      _, _, st ->
-        {:ok, st}
-    end, %{})
+  defp collect_shared(%{id: _gid} = graph, _root) do
+    graph.nodes |> Enum.reduce(Map.get(graph.assigns, :shared, %{}), fn
+      %Graph{} = g, shared -> Map.merge(shared, collect_shared(g))
+      %{assigns: assigns}, shared -> Map.merge(shared, Map.get(assigns, :shared, %{}))
+    end)
+    #Processing.dfs(graph, fn
+    #  :enter, {%{id: ^gid, assigns: assigns}, _}, st ->
+    #    if root do
+    #      {:ok, merge_shared(st, gid, Map.get(assigns, :shared))}
+    #    else
+    #      {:ok, st}
+    #    end
+    #  :enter, {%Graph{id: id, assigns: assigns} = g, _}, st ->
+    #    #id = Node.string_id(id)
+    #    #with shared <- merge_shared(st, id, Map.get(assigns, :shared)),
+    #    #     {:ok, nested} <- collect_shared(g, false) do
+    #    #  {:ok, nest_shared(shared, id, nested)}
+    #    #end
+    #    shared = Map.merge(st, Map.get(assigns, :shared, %{}))
+    #    Enum.reduce(g.nodes, )
+    #  :enter, {%GPUNode{id: id, assigns: %{shared: shared}}, _}, st ->
+    #    {:ok, merge_shared(st, id, shared)}
+    #  _, _, st ->
+    #    {:ok, st}
+    #end, %{})
   end
 end
