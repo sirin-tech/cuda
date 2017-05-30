@@ -2,21 +2,14 @@ defmodule Cuda.Memory do
   require Logger
 
   defmodule Shape do
-    defstruct [
-      type: nil,
-      skip: 0
-    ]
+    defstruct [:type, skip: 0]
+    def new(x), do: x
   end
 
   defstruct vars: []
 
-  def new(x, %Shape{} = shape) do
-    {:ok, {x, shape}}
-  end
-  # def size
-  # def size_equal?
-  def skip(bytes) do
-    <<0::unit(8)-size(bytes)>>
+  def new(vars) do
+    %__MODULE__{vars: vars}
   end
 
   def offset(%__MODULE__{vars: vars}, field) do
@@ -28,7 +21,7 @@ defmodule Cuda.Memory do
   def offset(shape, field) when is_map(shape) do
     result = shape |> Enum.reduce({:not_found, 0}, fn
       {^field, _}, {:not_found, offset} -> {:ok, offset}
-      {_, type}, {:not_found, offset} -> {:not_found, offset + type_size(type)}
+      {_, type}, {:not_found, offset} -> {:not_found, offset + size(type)}
       _, result -> result
     end) |> IO.inspect
     with {:ok, offset} <- result do
@@ -70,7 +63,7 @@ defmodule Cuda.Memory do
   def pack(x, "f64"), do: pack(x, :f64)
   def pack(x, {type, arity}) when not is_tuple(arity), do: pack(x, {type, {arity}})
   def pack(x, {type, arity}) when is_list(x) do
-    arity = type_size(arity)
+    arity = size(arity)
     x = List.flatten(x)
     if length(x) == arity do
       x |> Enum.map(& pack(&1, type)) |> Enum.join
@@ -79,7 +72,7 @@ defmodule Cuda.Memory do
     end
   end
   def pack(:zero, {type, arity}) do
-    size = type_size(arity) * type_size(type)
+    size = size(arity) * size(type)
     <<0::unit(8)-size(size)>>
   end
   def pack(x, types) when is_list(types) and is_list(x) do
@@ -187,7 +180,7 @@ defmodule Cuda.Memory do
   def unpack(_, _), do: nil
 
   defp unpack_list(x, {type, [arity]}) do
-    size = type_size(type)
+    size = size(type)
     Enum.reduce(1..arity, {[], x}, fn
       _, {list, <<x::binary-size(size), rest::binary>>} ->
         data = [unpack(x, type)]
@@ -210,46 +203,51 @@ defmodule Cuda.Memory do
     {[], rest}
   end
   defp unpack_list(x, type) do
-    size = type_size(type)
+    size = size(type)
     #IO.inspect({x, type, size, byte_size(x)})
     <<x::binary-size(size), rest::binary>> = x
     {[unpack(x, type)], rest}
   end
 
   @type_re ~r/(\d+)/
-  def type_size(:i8),  do: 1
-  def type_size(:i16), do: 2
-  def type_size(:i32), do: 4
-  def type_size(:i64), do: 8
-  def type_size(:u8),  do: 1
-  def type_size(:u16), do: 2
-  def type_size(:u32), do: 4
-  def type_size(:u64), do: 8
-  def type_size(:f16), do: 2
-  def type_size(:f32), do: 4
-  def type_size(:f64), do: 8
-  def type_size({:skip, n}), do: n
-  def type_size(type) when is_atom(type) or is_bitstring(type) do
+  def size(:i8),  do: 1
+  def size(:i16), do: 2
+  def size(:i32), do: 4
+  def size(:i64), do: 8
+  def size(:u8),  do: 1
+  def size(:u16), do: 2
+  def size(:u32), do: 4
+  def size(:u64), do: 8
+  def size(:f16), do: 2
+  def size(:f32), do: 4
+  def size(:f64), do: 8
+  def size({:skip, n}), do: n
+  def size(type) when is_atom(type) or is_bitstring(type) do
     case Regex.run(@type_re, "#{type}", capture: :all_but_first) do
       [n] -> div(String.to_integer(n), 8)
       _   -> 0
     end
   end
-  def type_size(tuple) when is_tuple(tuple) do
+  def size(tuple) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list
-    |> Enum.map(&type_size/1)
+    |> Enum.map(&size/1)
     |> Enum.reduce(1, &Kernel.*/2)
   end
-  def type_size(i) when is_integer(i), do: i
-  def type_size(l) when is_list(l) do
-    l |> Enum.map(&type_size/1) |> Enum.reduce(0, &+/2)
+  def size(i) when is_integer(i), do: i
+  def size(l) when is_list(l) do
+    l |> Enum.map(&size/1) |> Enum.reduce(0, &+/2)
   end
-  def type_size(%Shape{skip: {sbefore, safter}, type: type}) do
-    type_size(type) + sbefore + safter
+  def size(%Shape{type: nil}), do: 0
+  def size(%Shape{type: type, skip: {sbefore, safter}}) do
+    size({:skip, sbefore + safter}) + size(type)
   end
-  def type_size(%Shape{skip: safter, type: type}) do
-    type_size(type) + safter
+  def size(%Shape{type: type, skip: skip}) when is_integer(skip) do
+    size({:skip, skip}) + size(type)
   end
-  def type_size(_), do: 0
+  def size(_), do: 0
+
+  def size_equal?(x, y) do
+    size(x) == size(y)
+  end
 end
