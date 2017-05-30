@@ -1,52 +1,38 @@
 defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
   alias Cuda.Template
-  alias Cuda.Graph.NodeProto
-  alias Cuda.Graph.Node
+  alias Cuda.Graph.{Node, NodeProto}
+
+  import Cuda.Compiler.Utils
 
   defmodule Helpers do
+    alias Cuda.Compiler.Context
+    alias Cuda.Memory
     use Bitwise
     require Logger
 
-    def pin_offset(ctx, name) do
-      with nil <- get_in(ctx.assigns, [:pin_offsets, name]) do
-        Logger.warn("Can't find offset for pin `#{name}` of node `#{ctx.node.id}`")
-        nil
+    def offset(ctx, memory, var) do
+      shape = Context.find_assign(ctx, [:memory, memory], ctx.path, &has_var?(&1, var))
+      shape = with nil <- shape do
+        get_in(ctx.assigns, [:memory, memory])
       end
+      Memory.offset(shape, var)
     end
 
-    def shared_offset(ctx, name) do
-      offsets = ctx.assigns.shared_offsets
-                |> Enum.map(fn {k, v} -> {Node.string_id(k), v} end)
-                |> Enum.into(%{})
-      with nil <- find_shared_offset(ctx.node.id, name, offsets),
-           nil <- find_shared_offset(ctx.node.assigns[:alias], name, offsets) do
-        id = Node.string_id(ctx.node.id)
-        Logger.warn("Can't find offset for shared `#{name}` of node `#{id}`")
-        #Logger.warn("Avaialable shares are: #{inspect offsets}")
-        nil
-      end
+    defp has_var?(%Memory{vars: vars}, var) do
+      Keyword.has_key?(vars, var)
+    end
+    defp has_var?(map, var) do
+      Map.has_key?(map, var)
     end
 
-    defp find_shared_offset(nil, _, _), do: nil
-    defp find_shared_offset(id, name, offsets) do
-      IO.inspect(offsets)
-      #[_ | id] =
-        id
-                 |> Node.string_id()
-                 |> String.split("__")
-      |> Enum.reduce([], fn
-        part, []               -> [[part]]
-        part, [path | _] = acc -> [(path ++ [part]) | acc]
-      end)
-      |> Enum.map(& Enum.join(&1, "__"))
-      |> IO.inspect
-      |> Enum.find_value(& offsets[&1][name]) #[name][&1])
+    defp current_node_id(ctx) do
+      Node.string_id(Map.get(Context.node(ctx) || %{}, :id))
     end
 
     def kernel(ctx, name, body, opts \\ []) do
       params = [{:pins, :u64, [ptr: true]}] ++ Keyword.get(opts, :args, [])
       params = params |> Enum.map(&param/1) |> Enum.join(", ")
-      ".visible .entry #{Node.string_id(ctx.node.id)}__#{name} (#{params}) {\n" <>
+      ".visible .entry #{current_node_id(ctx)}__#{name} (#{params}) {\n" <>
       body <>
       "\n}"
     end
@@ -126,9 +112,10 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
   end
 
   def sources(node, ctx) do
-    vars = Map.get(node.assigns, :vars, %{}) |> Enum.into(%{})
+    node = put_pins_shapes(node)
+    ctx = Cuda.Compiler.Context.replace_current(ctx, node)
     helpers = [Helpers] ++ Map.get(node.assigns, :helpers, [])
-    opts = [context: %{ctx | node: node, vars: vars}, helpers: helpers]
+    opts = [context: ctx, helpers: helpers]
     ptx = case node.module.__ptx__(node) do
       src when is_bitstring(src) -> [src]
       src when is_list(src)      -> src
@@ -147,20 +134,14 @@ end
 
 defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
   alias Cuda.Compiler
-  alias Cuda.Compiler.GPUUnit
-  alias Cuda.Graph.NodeProto
-  alias Cuda.Graph.Pin
-  alias Cuda.Graph.Node
+  alias Cuda.Compiler.{Context, GPUUnit}
+  alias Cuda.Graph.{Node, NodeProto}
   require Logger
 
-  import Cuda.Compiler.Utils
-
   def compile(node, ctx) do
+    ctx = Context.for_node(ctx, node)
     Logger.info("CUDA: Compiling GPU code for node #{node.module} (#{node.id})")
     with {:ok, node}  <- node.module.__compile__(node),
-         %{} = node   <- assign_offsets(node),
-         %{} = node   <- put_pins_shapes(node),
-         ctx = %{ctx | assigns: Map.put(ctx.assigns, :pin_offsets, node.assigns.pin_offsets)},
          {:ok, node}  <- GPUUnit.sources(node, ctx),
          {:ok, cubin} <- Compiler.compile(node.assigns.sources) do
       batch = node.module.__batch__(node)
@@ -180,13 +161,5 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
                     "#{node.module} (#{node.id})")
         {:error, :compile_error}
     end
-  end
-
-  defp assign_offsets(%{pins: pins} = node) do
-    {offsets, _} = Enum.reduce(pins, {%{}, 0}, fn pin, {offsets, offset} ->
-      size = Pin.data_size(pin)
-      {Map.put(offsets, pin.id, offset), offset + size}
-    end)
-    NodeProto.assign(node, :offsets, offsets)
   end
 end

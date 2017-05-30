@@ -3,7 +3,7 @@ defmodule Cuda.Compiler.GPUNodeTest do
 
   import Cuda.Test.CudaHelpers
 
-  alias Cuda.Compiler.GPUUnit
+  alias Cuda.Compiler.{Context, GPUUnit}
   alias Cuda.Graph.Factory
 
   defmodule PTXNode do
@@ -29,21 +29,24 @@ defmodule Cuda.Compiler.GPUNodeTest do
     test "returns ptx sources" do
       node = Factory.new(%Cuda.Graph.GPUNode{}, :node, PTXNode, [], env())
       node = %{node | assigns: %{vars: %{x: 10}}}
-      {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(node, context())
+      context = %Context{root: node, path: []}
+      {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(node, context)
       assert sources == [{:ptx, "PTX-10"}]
     end
 
     test "returns c sources" do
       node = Factory.new(%Cuda.Graph.GPUNode{}, :node, CNode, [], env())
       node = %{node | assigns: %{vars: %{x: 20}}}
-      {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(node, context())
+      context = %Context{root: node, path: []}
+      {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(node, context)
       assert sources == [{:c, "C-20"}]
     end
 
     test "returns both c and ptx sources" do
       node = Factory.new(%Cuda.Graph.GPUNode{}, :node, PTXCNode, [], env())
       node = %{node | assigns: %{vars: %{x: 10, y: 20}}}
-      {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(node, context())
+      context = %Context{root: node, path: []}
+      {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(node, context)
       assert sources == [{:ptx, "PTX-10"}, {:c, "C-20"}]
     end
   end

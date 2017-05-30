@@ -3,10 +3,12 @@ defmodule Cuda.Template.Helpers do
   Represents set of helper functions for EEx templates
   """
 
+  alias Cuda.Compiler.Context
+
   @doc """
   Returns Cuda environment variable value
   """
-  @spec env(context :: Cuda.Template.Context.t, variable_name :: String.t | atom | number) :: any
+  @spec env(context :: Context.t, variable_name :: String.t | atom | number) :: any
   def env(ctx, var_name) do
     Map.get(ctx.env, var_name)
   end
@@ -14,15 +16,10 @@ defmodule Cuda.Template.Helpers do
   @doc """
   Returns context variable value
   """
-  @spec var(context :: Cuda.Template.Context.t, variable_name :: String.t | atom | number) :: any
+  @spec var(context :: Context.t, variable_name :: String.t | atom | number) :: any
   def var(ctx, var_name) do
-    get_in(ctx.vars, [var_name])
+    with nil <- Context.find_assign(ctx, [:vars, var_name]) do
+      get_in(ctx.assigns, [:vars, var_name])
+    end
   end
-
-  #defmacro @(var_name) do
-  #  IO.inspect(var_name)
-  #  quote do
-  #    # get_in(var!(ctx).vars, [unquote(var_name)]) |> IO.inspect
-  #  end
-  #end
 end

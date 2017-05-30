@@ -1,16 +1,12 @@
 defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
-  alias Cuda.Graph.Node
-  alias Cuda.Graph.Pin
-  alias Cuda.Graph.NodeProto
-  alias Cuda.Graph.GraphProto
-  alias Cuda.Graph.Processing
-  alias Cuda.Compiler.GPUUnit
+  alias Cuda.Graph.{Node, Pin, NodeProto, GraphProto, Processing}
+  alias Cuda.Compiler.{Context, GPUUnit}
 
   require Integer
   require Cuda
   import Integer, only: [is_odd: 1]
   import Cuda, only: [compile_error: 1]
-  import Node, only: [input_pin_types: 0, output_pin_types: 0]
+  import Node, only: [input_pin_types: 0]
   import Cuda.Compiler.Utils
 
   def sources(%{type: :computation_graph} = graph, ctx) do
@@ -84,29 +80,11 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     end)
   end
 
-  defp collect_sizes({node, idx}, {graph, s1, s2}) do
-    node = GraphProto.node(graph, node)
-    {pins1, pins2} = case div(idx, 2) do
-      0 -> {input_pin_types(), output_pin_types()}
-      _ -> {output_pin_types(), input_pin_types()}
-    end
-    size1 = node
-            |> NodeProto.pins(pins1)
-            |> Enum.map(&Pin.data_size/1)
-            |> Enum.max()
-    size2 = node
-            |> NodeProto.pins(pins2)
-            |> Enum.map(&Pin.data_size/1)
-            |> Enum.max()
-    {graph, Enum.max([s1, size1]), Enum.max([s2, size2])}
-  end
-
   defp collect_sources(graph, ctx) do
     graph.nodes |> Enum.reduce(graph, fn node, graph ->
-      offsets = node.assigns.pin_offsets
-      assigns = Map.put(ctx.assigns, :pin_offsets, offsets)
+      ctx = Context.replace_current(ctx, graph)
       with {:ok, node} <- node.module.__compile__(node),
-           {:ok, node} <- GPUUnit.sources(node, %{ctx | assigns: assigns}) do
+           {:ok, node} <- GPUUnit.sources(node, Context.for_node(ctx, node)) do
         id = Node.string_id(node.id)
         batch = node.module.__batch__(node) |> Enum.map(fn
           {:run, {name, g, b, args}} -> {:run, {"#{id}__#{name}", g, b, args}}
@@ -275,10 +253,8 @@ end
 
 defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   alias Cuda.Compiler
-  alias Cuda.Compiler.GPUUnit
-  alias Cuda.Graph.NodeProto
-  alias Cuda.Graph.GraphProto
-  alias Cuda.Graph.Processing
+  alias Cuda.Compiler.{Context, GPUUnit}
+  alias Cuda.Graph.{NodeProto, GraphProto, Processing}
   require Logger
 
   def compile(%{type: :computation_graph} = graph, ctx) do
@@ -300,6 +276,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
     end
   end
   def compile(graph, ctx) do
+    ctx = Context.for_node(ctx, graph)
     Logger.info("CUDA: Compiling graph #{graph.module} (#{graph.id})")
     with {:ok, graph}    <- graph.module.__compile__(graph),
          Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/source.svg"),

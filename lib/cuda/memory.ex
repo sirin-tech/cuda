@@ -8,6 +8,8 @@ defmodule Cuda.Memory do
     ]
   end
 
+  defstruct vars: []
+
   def new(x, %Shape{} = shape) do
     {:ok, {x, shape}}
   end
@@ -15,6 +17,30 @@ defmodule Cuda.Memory do
   # def size_equal?
   def skip(bytes) do
     <<0::unit(8)-size(bytes)>>
+  end
+
+  def offset(%__MODULE__{vars: vars}, field) do
+    case Keyword.get(vars, field) do
+      {offset, _} -> offset
+      _           -> nil
+    end
+  end
+  def offset(shape, field) when is_map(shape) do
+    result = shape |> Enum.reduce({:not_found, 0}, fn
+      {^field, _}, {:not_found, offset} -> {:ok, offset}
+      {_, type}, {:not_found, offset} -> {:not_found, offset + type_size(type)}
+      _, result -> result
+    end) |> IO.inspect
+    with {:ok, offset} <- result do
+      offset
+    else
+      _ -> nil
+    end
+  end
+  def offset(_, _), do: nil
+
+  def merge(%__MODULE__{vars: a}, %__MODULE__{vars: b}) do
+    %__MODULE__{vars: Keyword.merge(a, b)}
   end
 
   def pack(:zero, t) when is_atom(t) or is_bitstring(t), do: pack(0, t)
@@ -218,6 +244,12 @@ defmodule Cuda.Memory do
   def type_size(i) when is_integer(i), do: i
   def type_size(l) when is_list(l) do
     l |> Enum.map(&type_size/1) |> Enum.reduce(0, &+/2)
+  end
+  def type_size(%Shape{skip: {sbefore, safter}, type: type}) do
+    type_size(type) + sbefore + safter
+  end
+  def type_size(%Shape{skip: safter, type: type}) do
+    type_size(type) + safter
   end
   def type_size(_), do: 0
 end

@@ -3,8 +3,8 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
 
   import Cuda.Test.CudaHelpers
 
-  alias Cuda.Compiler.GPUUnit
-  alias Cuda.Graph.GPUNode
+  alias Cuda.Compiler.{Context, GPUUnit}
+  alias Cuda.Graph.{NodeProto, GPUNode}
   alias Cuda.Graph.Factory
 
   defmodule PTXNode do
@@ -17,19 +17,17 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
     Factory.new(%GPUNode{}, :node, PTXNode, [ptx: ptx], env())
   end
 
-  defp gen_ptx(text) do
-    node = new_node(text)
-    ctx = %{context() | assigns: %{pin_offsets: [i: 0, o: 2]}}
+  defp gen_ptx(text, opts \\ []) do
+    node = new_node(text) |> NodeProto.assign(Keyword.get(opts, :node_assigns, %{}))
+    ctx = %Context{root: node, path: [], assigns: Keyword.get(opts, :ctx_assigns, %{})}
     {:ok, %{assigns: %{sources: [{:ptx, ptx}]}}} = GPUUnit.sources(node, ctx)
     parse_ptx(ptx)
   end
 
   describe "offset/2" do
-    test "returns pin offset" do
-      ptx = gen_ptx(~s{<%= pin_offset(ctx, :i) %>})
-      assert ptx == ["0"]
-      ptx = gen_ptx(~s{<%= pin_offset(ctx, :o) %>})
-      assert ptx == ["2"]
+    test "returns memory offset" do
+      assert gen_ptx(~s{<%= offset(ctx, :pins, :i) %>}) == ["0"]
+      assert gen_ptx(~s{<%= offset(ctx, :pins, :o) %>}) == ["2"]
     end
   end
 

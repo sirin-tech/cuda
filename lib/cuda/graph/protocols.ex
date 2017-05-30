@@ -35,14 +35,14 @@ defprotocol Cuda.Graph.GraphProto do
   to replace as second argument and replacement node as a third argument.
   """
   @spec replace(graph :: Graph.t, node :: Node.t) :: Graph.t
-  @spec replace(graph :: Graph.t, id :: Graph.id, node :: Node.t) :: Graph.t
+  @spec replace(graph :: Graph.t, id :: Graph.id | [Graph.id], node :: Node.t) :: Graph.t
   def replace(graph, node)
   def replace(graph, id, node)
 
   @doc """
-  Returns node in the graph by its name
+  Returns node in the graph by its name or path (a list of names)
   """
-  @spec node(graph :: Graph.t, id :: Graph.id) :: Node.t
+  @spec node(graph :: Graph.t, id :: Graph.id | [Graph.id]) :: Node.t
   def node(graph, id)
 end
 
@@ -103,6 +103,12 @@ defimpl Cuda.Graph.GraphProto, for: Any do
     end)
     %{graph | nodes: nodes}
   end
+  def replace(graph, [], node), do: replace(graph, node)
+  def replace(graph, [id | path], node) do
+    with %{} = child <- Cuda.Graph.GraphProto.node(graph, id) do
+      replace(graph, replace(child, path, node))
+    end
+  end
   def replace(%{nodes: nodes} = graph, id, node) do
     nodes = nodes |> Enum.map(fn
       %{id: ^id} -> node
@@ -111,6 +117,13 @@ defimpl Cuda.Graph.GraphProto, for: Any do
     %{graph | nodes: nodes}
   end
 
+  def node(_, []), do: nil
+  def node(%{nodes: _} = graph, [id]), do: node(graph, id)
+  def node(%{nodes: _} = graph, [id | path]) do
+    with %{} = child <- Cuda.Graph.GraphProto.node(graph, id) do
+      Cuda.Graph.GraphProto.node(child, path)
+    end
+  end
   def node(%{nodes: nodes}, id) do
     nodes |> Enum.find(fn
       %{id: ^id} -> true

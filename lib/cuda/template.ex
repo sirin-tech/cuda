@@ -52,7 +52,7 @@ defmodule Cuda.Template do
   defp eval(template, context, helpers) do
     opts = [functions: get_funcs(helpers),
             macros: get_macros(helpers)]
-    EEx.eval_string(template, [ctx: context], opts)
+    EEx.eval_string(template, [ctx: context, assigns: context.assigns], opts)
   end
 
   defp get_funcs([]), do: []
