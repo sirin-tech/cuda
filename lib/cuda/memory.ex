@@ -23,7 +23,7 @@ defmodule Cuda.Memory do
       {^field, _}, {:not_found, offset} -> {:ok, offset}
       {_, type}, {:not_found, offset} -> {:not_found, offset + size(type)}
       _, result -> result
-    end) |> IO.inspect
+    end)
     with {:ok, offset} <- result do
       offset
     else
