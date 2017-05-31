@@ -89,6 +89,21 @@ defmodule Cuda.Memory do
     types |> Enum.map(& pack(:zero, &1)) |> Enum.join()
   end
   def pack(x, types) when is_list(types), do: pack([x], types)
+  def pack(%{} = x, %Shape{type: type, skip: %{} = skip}) do
+    x
+    |> Map.to_list()
+    |> Enum.reduce("", fn {key, val}, acc ->
+      t = Map.get(type, key)
+      s = Map.get(skip, key)
+      acc <> pack(val, %Shape{type: t, skip: s})
+    end)
+  end
+  def pack(x, %Shape{type: type, skip: {sbefore, safter}}) do
+    pack(0, {:skip, sbefore}) <> pack(x, type) <> pack(0, {:skip, safter})
+  end
+  def pack(x, %Shape{type: type, skip: skip}) when is_integer(skip) do
+    pack(x, type) <> pack(0, {:skip, skip})
+  end
   def pack(x, types) when is_map(types) and is_map(x) do
     types
     |> Enum.map(fn {k, type} ->
@@ -105,12 +120,6 @@ defmodule Cuda.Memory do
   end
   def pack(nil, type) do
     Logger.warn("Attempt to pack `nil` value for type #{inspect type}")
-  end
-  def pack(x, %Shape{type: type, skip: {sbefore, safter}}) do
-    pack(0, {:skip, sbefore}) <> pack(x, type) <> pack(0, {:skip, safter})
-  end
-  def pack(x, %Shape{type: type, skip: skip}) when is_integer(skip) do
-    pack(x, type) <> pack(0, {:skip, skip})
   end
   def pack(_, _), do: <<>>
 
@@ -141,10 +150,12 @@ defmodule Cuda.Memory do
     arity = arity |> Tuple.to_list |> Enum.reverse
     {list, _} = unpack_list(x, {type, arity})
     list
+    |> unp_flat()
   end
   def unpack(x, {type, arity}) when not is_tuple(arity) do
     {list, _} = unpack_list(x, {type, [arity]})
     list
+    |> unp_flat()
   end
   def unpack(x, types) when is_list(types) do
     {list, _} = types |> Enum.reduce({[], x}, fn
@@ -155,16 +166,22 @@ defmodule Cuda.Memory do
         acc
     end)
     list
+    |> unp_flat()
   end
-  def unpack(x, types) when is_map(types) do
-    {list, _} = types |> Enum.reduce({%{}, x}, fn
-      {k, type}, {map, rest} ->
-        {[data], rest} = unpack_list(rest, type)
-        {Map.put(map, k, data), rest}
-      _, acc ->
-        acc
+  def unpack(x, %Shape{type: %{} = type, skip: %{} = skip}) do
+    type = type
+    |> Map.to_list()
+    |> Enum.map(fn {key, val} ->
+      val = is_list(val) && val || [val]
+      case Map.get(skip, key, 0)  do
+        {sbefore, safter} -> {key, [{:skip, sbefore} | val] ++ [{:skip, safter}]}
+        0                 -> {key, val}
+        s                 -> {key, val ++ [{:skip, s}]}
+      end
     end)
-    list
+    |> Enum.into(%{})
+    x
+    |> unpack(type)
   end
   def unpack(x, %Shape{type: type, skip: {sbefore, safter}}) do
     size = byte_size(x) - sbefore - safter
@@ -176,6 +193,17 @@ defmodule Cuda.Memory do
     size = byte_size(x) - skip
     <<data::binary-size(size), _::binary>> = x
     unpack(data, type)
+  end
+  def unpack(x, types) when is_map(types) do
+    {list, _} = types |> Enum.reduce({%{}, x}, fn
+      {k, type}, {map, rest} ->
+        {[data], rest} = unpack_list(rest, type)
+        {Map.put(map, k, data), rest}
+      _, acc ->
+        acc
+    end)
+    list
+    |> unp_flat()
   end
   def unpack(_, _), do: nil
 
@@ -209,6 +237,15 @@ defmodule Cuda.Memory do
     {[unpack(x, type)], rest}
   end
 
+  defp unp_flat(%{} = value) do
+    value
+    |> Map.to_list()
+    |> Enum.map(fn {k, v} -> {k, unp_flat(v)} end)
+    |> Enum.into(%{})
+  end
+  defp unp_flat([value]) when is_list(value), do: unp_flat(value)
+  defp unp_flat(value),                       do: value
+
   @type_re ~r/(\d+)/
   def size(:i8),  do: 1
   def size(:i16), do: 2
@@ -239,11 +276,25 @@ defmodule Cuda.Memory do
     l |> Enum.map(&size/1) |> Enum.reduce(0, &+/2)
   end
   def size(%Shape{type: nil}), do: 0
+  def size(%Shape{type: type, skip: %{} = skip}) do
+    ssize = skip
+    |> Map.to_list()
+    |> Enum.reduce(0, fn
+      {_, {v1, v2}}, acc -> acc + v1 + v2
+      {_, v}, acc        -> acc + v
+    end)
+    size(type) + ssize
+  end
   def size(%Shape{type: type, skip: {sbefore, safter}}) do
     size({:skip, sbefore + safter}) + size(type)
   end
   def size(%Shape{type: type, skip: skip}) when is_integer(skip) do
     size({:skip, skip}) + size(type)
+  end
+  def size(m) when is_map(m) do
+    m
+    |> Enum.map(fn {_, v} -> size(v) end)
+    |> Enum.reduce(0, &+/2) 
   end
   def size(_), do: 0
 
