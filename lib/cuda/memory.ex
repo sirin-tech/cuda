@@ -1,6 +1,8 @@
 defmodule Cuda.Memory do
   require Logger
 
+  use Cuda.Float16
+
   defmodule Shape do
     defstruct [:type, skip: 0]
     def new(x), do: x
@@ -54,11 +56,10 @@ defmodule Cuda.Memory do
   def pack(x, "u16"), do: pack(x, :u16)
   def pack(x, "u32"), do: pack(x, :u32)
   def pack(x, "u64"), do: pack(x, :u64)
-  # TODO: pack 16-bit floats
-  # def pack(x, :f16), do: <<x::float-little-size(16)>>
+  def pack(x, :f16), do: Float16.pack(x)
   def pack(x, :f32), do: <<x::float-little-size(32)>>
   def pack(x, :f64), do: <<x::float-little-size(64)>>
-  # def pack(x, "f16"), do: pack(x, :f16)
+  def pack(x, "f16"), do: pack(x, :f16)
   def pack(x, "f32"), do: pack(x, :f32)
   def pack(x, "f64"), do: pack(x, :f64)
   def pack(x, {type, arity}) when not is_tuple(arity), do: pack(x, {type, {arity}})
@@ -139,11 +140,10 @@ defmodule Cuda.Memory do
   def unpack(x, "u16"), do: unpack(x, :u16)
   def unpack(x, "u32"), do: unpack(x, :u32)
   def unpack(x, "u64"), do: unpack(x, :u64)
-  # TODO: pack 16-bit floats
-  # def pack(x, :f16), do: <<x::float-little-size(16)>>
+  def unpack(x, :f16), do: Float16.unpack(x)
   def unpack(<<x::float-little-size(32)>>, :f32), do: x
   def unpack(<<x::float-little-size(64)>>, :f64), do: x
-  # def pack(x, "f16"), do: pack(x, :f16)
+  def unpack(x, "f16"), do: unpack(x, :f16)
   def unpack(x, "f32"), do: unpack(x, :f32)
   def unpack(x, "f64"), do: unpack(x, :f64)
   def unpack(x, {type, arity}) when is_tuple(arity) do
@@ -294,7 +294,7 @@ defmodule Cuda.Memory do
   def size(m) when is_map(m) do
     m
     |> Enum.map(fn {_, v} -> size(v) end)
-    |> Enum.reduce(0, &+/2) 
+    |> Enum.reduce(0, &+/2)
   end
   def size(_), do: 0
 
