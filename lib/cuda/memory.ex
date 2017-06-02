@@ -6,22 +6,41 @@ defmodule Cuda.Memory do
     def new(x), do: x
   end
 
-  defstruct vars: []
+  defstruct type: :owned, vars: []
 
-  def new(vars) do
-    %__MODULE__{vars: vars}
+  def new(vars, type \\ :owned) do
+    {vars, _} = Enum.reduce(vars, {%{}, 0}, fn
+      {k, {o, _} = v}, {vars, offset} when is_integer(o) ->
+        {Map.put(vars, k, v), offset}
+      {k, type}, {vars, offset} ->
+        IO.inspect({k, offset, size(type)})
+        {Map.put(vars, k, {offset, type}), offset + size(type)}
+    end)
+    %__MODULE__{vars: vars, type: type}
   end
 
+  def offset(nil, _), do: nil
+  def offset(_, nil), do: nil
+  def offset(%__MODULE__{vars: vars}, [field | rest]) do
+    case Keyword.get(vars, field) do
+      {offset, type} ->
+        with n when is_integer(n) <- offset(type, rest) do
+          offset + n
+        end
+      _ ->
+        nil
+    end
+  end
   def offset(%__MODULE__{vars: vars}, field) do
     case Keyword.get(vars, field) do
       {offset, _} -> offset
       _           -> nil
     end
   end
-  def offset(shape, field) when is_map(shape) do
+  def offset(shape, [field | rest]) when is_map(shape) do
     result = shape |> Enum.reduce({:not_found, 0}, fn
       {^field, _}, {:not_found, offset} -> {:ok, offset}
-      {_, type}, {:not_found, offset} -> {:not_found, offset + size(type)}
+      {_, type}, {:not_found, offset} -> {:not_found, offset + offset(type, rest)}
       _, result -> result
     end)
     with {:ok, offset} <- result do
@@ -30,7 +49,8 @@ defmodule Cuda.Memory do
       _ -> nil
     end
   end
-  def offset(_, _), do: nil
+  def offset(shape, []), do: size(shape)
+  def offset(shape, field), do: offset(shape, [field])
 
   def merge(%__MODULE__{vars: a}, %__MODULE__{vars: b}) do
     %__MODULE__{vars: Keyword.merge(a, b)}
@@ -89,6 +109,14 @@ defmodule Cuda.Memory do
     types |> Enum.map(& pack(:zero, &1)) |> Enum.join()
   end
   def pack(x, types) when is_list(types), do: pack([x], types)
+  def pack(x, %__MODULE__{vars: vars}) when is_map(x) do
+    vars
+    |> Enum.map(fn {k, {_offset, type}} ->
+      #IO.inspect({k, type, Map.get(x, k, :zero)})
+      pack(Map.get(x, k, :zero), type)
+    end)
+    |> Enum.join()
+  end
   def pack(x, types) when is_map(types) and is_map(x) do
     types
     |> Enum.map(fn {k, type} ->

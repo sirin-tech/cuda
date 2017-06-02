@@ -33,14 +33,14 @@ private:
   void WritePacketLength(uint32_t len);
 
 protected:
-  void WriteTermPacket(ETERM *packet);
-  void WriteRawPacket(void *data, size_t size);
   virtual ETERM *HandleTermFunction(std::string name, ETERM *arg) = 0;
   virtual ETERM *HandleRawFunction(std::string name, RawData &data, size_t size) = 0;
 
 public:
   ErlangPort();
   ~ErlangPort();
+  void WriteTermPacket(ETERM *packet);
+  void WriteRawPacket(void *data, size_t size);
   void Loop();
 };
 

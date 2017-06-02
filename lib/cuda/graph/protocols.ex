@@ -103,7 +103,8 @@ defimpl Cuda.Graph.GraphProto, for: Any do
     end)
     %{graph | nodes: nodes}
   end
-  def replace(graph, [], node), do: replace(graph, node)
+  def replace(%{nodes: _} = graph, [], node), do: replace(graph, node)
+  def replace(%{id: src}, [], %{id: dst} = node) when src == dst, do: node
   def replace(graph, [id | path], node) do
     with %{} = child <- Cuda.Graph.GraphProto.node(graph, id) do
       replace(graph, replace(child, path, node))

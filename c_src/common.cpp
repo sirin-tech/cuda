@@ -1,7 +1,7 @@
 #include "common.h"
 
 ETERM *StringError::AsTerm() {
-  return FORMAT("{~a,~w,~w}", ERROR_STR,
+  return FORMAT("{error,~w,~w}",
     erl_mk_binary(source.c_str(), source.size()),
     erl_mk_binary(message.c_str(), message.size()));
 }
@@ -9,7 +9,7 @@ ETERM *StringError::AsTerm() {
 ETERM *RuntimeError::AsTerm() {
   const char *name = cudaGetErrorName(code);
   const char *str = cudaGetErrorString(code);
-  return FORMAT("{~a,~w,~w,~w}", ERROR_STR,
+  return FORMAT("{error,~w,~w,~w}",
     erl_mk_binary(source.c_str(), source.size()),
     erl_mk_binary(name, strlen(name)),
     erl_mk_binary(str, strlen(str)));
@@ -20,12 +20,12 @@ ETERM *DriverError::AsTerm() {
   if (cuGetErrorName(code, &name) == CUDA_SUCCESS &&
       cuGetErrorString(code, &str) == CUDA_SUCCESS) {
     // DEBUG("DeviceError: " << name << ", " << str);
-    return FORMAT("{~a,~w,~w,~w}", ERROR_STR,
+    return FORMAT("{error,~w,~w,~w}",
       erl_mk_binary(source.c_str(), source.size()),
       erl_mk_binary(name, strlen(name)),
       erl_mk_binary(str, strlen(str)));
   }
-  return FORMAT("{~a,~w,~w}", ERROR_STR,
+  return FORMAT("{error,~w,~w}",
     erl_mk_binary(source.c_str(), source.size()),
     MAKE_BINARY("Unknown error"));
 }

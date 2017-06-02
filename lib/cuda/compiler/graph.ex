@@ -81,8 +81,8 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   end
 
   defp collect_sources(graph, ctx) do
+    ctx = Context.replace_current(ctx, graph)
     graph.nodes |> Enum.reduce(graph, fn node, graph ->
-      ctx = Context.replace_current(ctx, graph)
       with {:ok, node} <- node.module.__compile__(node),
            {:ok, node} <- GPUUnit.sources(node, Context.for_node(ctx, node)) do
         id = Node.string_id(node.id)
@@ -276,7 +276,6 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
     end
   end
   def compile(graph, ctx) do
-    ctx = Context.for_node(ctx, graph)
     Logger.info("CUDA: Compiling graph #{graph.module} (#{graph.id})")
     with {:ok, graph}    <- graph.module.__compile__(graph),
          Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/source.svg"),
@@ -285,6 +284,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
          %{} = graph     <- Processing.precompile_wrap(graph),
          Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/wrapped.svg"),
          %{} = graph     <- topology_sort(graph),
+         ctx = Context.for_node(ctx, graph),
          {:ok, _, nodes} <- Enum.reduce(graph.nodes, {:ok, ctx, []}, &compile_reducer/2) do
       assigns = Enum.reduce(nodes, graph.assigns, fn
         %{type: :computation_graph, assigns: %{pin_offsets: offsets}}, acc ->
@@ -319,6 +319,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
   end
 
   defp compile_reducer(node, {:ok, ctx, nodes}) do
+    ctx = Context.for_node(ctx, node)
     with {:ok, node} <- Cuda.Compiler.Unit.compile(node, ctx) do
       {:ok, ctx, [node | nodes]}
     end

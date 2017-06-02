@@ -6,6 +6,7 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
   alias Cuda.Compiler.{Context, GPUUnit}
   alias Cuda.Graph.{NodeProto, GPUNode}
   alias Cuda.Graph.Factory
+  alias Cuda.Memory
 
   defmodule PTXNode do
     use GPUNode
@@ -28,6 +29,17 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
     test "returns memory offset" do
       assert gen_ptx(~s{<%= offset(ctx, :pins, :i) %>}) == ["0"]
       assert gen_ptx(~s{<%= offset(ctx, :pins, :o) %>}) == ["2"]
+    end
+  end
+
+  describe "shared_offset/2" do
+    test "returns shared offset" do
+      assigns = %{
+        vars: %{layer: :node},
+        memory: %{shared: %Memory{vars: [{:node, {10, %{a: :i16, b: :i32}}}]}}
+      }
+      assert gen_ptx(~s{<%= shared_offset(ctx, :a) %>}, ctx_assigns: assigns) == ["10"]
+      assert gen_ptx(~s{<%= shared_offset(ctx, :b) %>}, ctx_assigns: assigns) == ["12"]
     end
   end
 

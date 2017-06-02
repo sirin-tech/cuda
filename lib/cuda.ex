@@ -95,7 +95,8 @@ defmodule Cuda do
   end
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, [])
+    {name, opts} = Keyword.split(opts, ~w(name)a)
+    GenServer.start_link(__MODULE__, opts, name)
   end
 
   defmacro compile_error(msg) do

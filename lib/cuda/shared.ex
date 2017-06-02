@@ -1,6 +1,6 @@
 defmodule Cuda.Shared do
   use GenServer
-  alias Cuda.Graph.Pin
+  alias Cuda.Memory
 
   def start_link(opts \\ []) do
     {opts, args} = Keyword.split(opts, ~w(name)a)
@@ -9,13 +9,16 @@ defmodule Cuda.Shared do
 
   def init(opts) do
     with {:ok, cuda} <- Cuda.start_link() do
-      st = %{cuda: cuda, extracts: %{}, ref: nil}
+      st = %{cuda: cuda, memory: Keyword.get(opts, :memory), ref: nil}
       opts |> Keyword.get(:vars, %{}) |> load_vars(st)
     end
   end
 
   def load(pid, vars) do
     GenServer.call(pid, {:load, vars})
+  end
+  def load(pid, memory, vars) do
+    GenServer.call(pid, {:load, memory, vars})
   end
 
   def unload(pid) do
@@ -26,12 +29,8 @@ defmodule Cuda.Shared do
     GenServer.call(pid, :handle)
   end
 
-  def offsets(pid) do
-    GenServer.call(pid, :offsets)
-  end
-
-  def extracts(pid) do
-    GenServer.call(pid, :extracts)
+  def memory(pid) do
+    GenServer.call(pid, :memory)
   end
 
   def data(pid) do
@@ -52,6 +51,13 @@ defmodule Cuda.Shared do
     end
   end
 
+  def handle_call({:load, memory, vars}, _from, st) do
+    st = %{st | memory: memory}
+    with {:ok, st} <- load_vars(vars, st) do
+      {:reply, {:ok, st.ref}, st}
+    end
+  end
+
   def handle_call(:unload, _from, %{ref: ref} = st) when not is_nil(ref) do
     with :ok <- Cuda.memory_unload(st.cuda, st.ref) do
       {:reply, :ok, %{st | extracts: %{}, ref: nil}}
@@ -67,18 +73,8 @@ defmodule Cuda.Shared do
     {:reply, {:ok, st.ref}, st}
   end
 
-  def handle_call(:offsets, _from, st) do
-    offsets = st.extracts
-              |> Enum.map(&collect_offsets/1)
-              |> Enum.into(%{})
-    {:reply, {:ok, offsets}, st}
-  end
-
-  def handle_call(:extarcts, _from, st) do
-    extracts = st.extracts
-               |> Enum.map(fn {k, {o, s, _}} -> {k, {o, s}} end)
-               |> Enum.into(%{})
-    {:reply, {:ok, extracts}, st}
+  def handle_call(:memory, _from, st) do
+    {:reply, {:ok, st.memory}, st}
   end
 
   def handle_call(:data, _from, %{ref: ref} = st) when not is_nil(ref) do
@@ -105,28 +101,10 @@ defmodule Cuda.Shared do
     {:reply, result, st}
   end
 
-  defp collect_offsets({k, {o, _, t}}) when is_map(t) do
-    {o, _} = Enum.reduce(t, {%{}, 0}, fn {name, type}, {map, offset} ->
-      size = Pin.type_size(type)
-      {Map.put(map, name, o + offset), offset + size}
-    end)
-    {k, o}
-  end
-  defp collect_offsets({k, {o, _, _}}) do
-    {k, o}
-  end
-
-  defp load_vars(vars, st) do
-    #IO.inspect({vars, st})
-    {extracts, bin} = Enum.reduce(vars, {%{}, <<>>}, fn
-      {k, {type, value}}, {vars, bin} ->
-        value = Pin.pack(value, type)
-        offset = byte_size(bin)
-        size = byte_size(value)
-        {Map.put(vars, k, {offset, size, type}), bin <> value}
-      _, error ->
-        error
-    end)
+  defp load_vars(_, %{memory: nil} = st), do: {:ok, st}
+  defp load_vars(vars, %{memory: memory} = st) do
+    IO.inspect({vars, memory})
+    bin = Memory.pack(vars, memory)
     if byte_size(bin) > 0 do
       unload = case st.ref do
         nil -> :ok
@@ -134,10 +112,10 @@ defmodule Cuda.Shared do
       end
       with :ok <- unload,
            {:ok, ref} <- Cuda.memory_load(st.cuda, bin) do
-        {:ok, %{st | ref: ref, extracts: extracts}}
+        {:ok, %{st | ref: ref}}
       end
     else
-      {:ok, %{st | ref: nil, extracts: extracts}}
+      {:ok, %{st | ref: nil}}
     end
   end
 end

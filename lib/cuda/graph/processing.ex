@@ -299,9 +299,10 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # ----------------------------------------------------------------------------
   # expand
   # ----------------------------------------------------------------------------
+  def expand(%{assigns: %{expanded: x}} = node) when not is_nil(x), do: node
   def expand(%{nodes: nodes, links: links} = graph) do
-    {nodes, links} = Enum.flat_map_reduce(nodes, links, fn
-      %{id: child_id, type: type} = child, links when type in graph_types() ->
+    {nodes, {links, assigns}} = Enum.flat_map_reduce(nodes, {links, %{}}, fn
+      %{id: child_id, type: type} = child, {links, assigns} when type in graph_types() ->
         child = child
                 |> expand()
         nodes = child.nodes
@@ -309,13 +310,15 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
         links = child.links
                 |> Enum.map(& expand_link(&1, child_id))
                 |> Enum.reduce(links, & expand_link_reducer(&1, &2, child_id))
-        {nodes, links}
-      node, links ->
-        {[node], links}
+        assigns = Map.put(assigns, child_id, child.assigns)
+        {nodes, {links, assigns}}
+      node, {links, assigns} ->
+        assigns = Map.put(assigns, node.id, node.assigns)
+        {[node], {links, assigns}}
     end)
     graph = %{graph | nodes: nodes, links: links}
     if loop?(graph), do: compile_error("loop detected in expanded graph")
-    graph
+    graph |> NodeProto.assign(expanded: assigns)
   end
 
   defp expand_link_reducer({{:__self__, spin}, {:__self__, dpin}}, links, gid) do
@@ -698,6 +701,24 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   defp prc_wrap(graph, [chain | rest]) do
     nested_id = "comp_" <> UUID.uuid1()
     nested = Graph.Factory.new(%Cuda.Graph{}, nested_id, Graph.ComputationGraph, [], [])
+
+    assigns = Enum.reduce(chain, graph.assigns, fn
+      id, assigns when is_tuple(id) ->
+        key = id |> Tuple.to_list |> List.first
+        case get_in(assigns, [:expanded, key]) do
+          nil ->
+            assigns
+          values ->
+            expanded = assigns.expanded
+                       |> Map.drop([key])
+                       |> Map.put(nested_id, %{expanded: %{key => values}})
+            Map.put(assigns, :expanded, expanded)
+        end
+      _, assigns ->
+        assigns
+    end)
+    graph = %{graph | assigns: assigns}
+
     graph
     |> GraphProto.add(nested)
     |> move(nested_id, chain)

@@ -14,12 +14,39 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
       shape = Context.find_assign(ctx, [:memory, memory], ctx.path, &has_var?(&1, var))
       shape = with nil <- shape do
         get_in(ctx.assigns, [:memory, memory])
+      end# |> IO.inspect
+      with nil <- Memory.offset(shape, var) do
+        Logger.warn("Can't find offset for `#{inspect var}` in memory `#{memory}`")
+        nil
       end
-      Memory.offset(shape, var)
+    end
+
+    def shared_offset(ctx, var) do
+      #IO.inspect(ctx)
+      case Template.Helpers.var(ctx, :layer) do
+        nil   -> raise CompileError, description: "Layer variable is not defined"
+        layer -> offset(ctx, :shared, [var, layer])
+      end
+    end
+
+    defmacro offset(memory, var) do
+      quote do
+        offset(var!(ctx), unquote(memory), unquote(var))
+      end
+    end
+
+    defmacro shared_offset(var) do
+      quote do
+        shared_offset(var!(ctx), unquote(var))
+      end
     end
 
     defp has_var?(%Memory{vars: vars}, var) do
+      #IO.inspect({var, vars})
       Keyword.has_key?(vars, var)
+    end
+    defp has_var?(map, path) when is_list(path) do
+      get_in(map, path)
     end
     defp has_var?(map, var) do
       Map.has_key?(map, var)
@@ -139,9 +166,9 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph.GPUNode do
   require Logger
 
   def compile(node, ctx) do
-    ctx = Context.for_node(ctx, node)
     Logger.info("CUDA: Compiling GPU code for node #{node.module} (#{node.id})")
     with {:ok, node}  <- node.module.__compile__(node),
+         ctx = Context.for_node(ctx, node),
          {:ok, node}  <- GPUUnit.sources(node, ctx),
          {:ok, cubin} <- Compiler.compile(node.assigns.sources) do
       batch = node.module.__batch__(node)

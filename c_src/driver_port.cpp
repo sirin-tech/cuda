@@ -45,7 +45,7 @@ template <> LinkerOptions DriverPort::Unpack<LinkerOptions>(ETERM *term) {
 DriverPort::DriverPort(int device): ErlangPort() {
   try {
     auto result = cuInit(0);
-    if (result != CUDA_SUCCESS) throw DriverError(result);
+    if (result != CUDA_SUCCESS) throw DriverError(result, "DriverPort initialize");
     if (device < 0) device = BestDevice();
     if (device < 0) throw StringError("Where are no GPU devices to initialize");
     driver = new Driver(device);
@@ -98,7 +98,7 @@ ETERM *DriverPort::Compile(ETERM *arg) {
 
   auto options = Unpack<LinkerOptions>(erl_element(2, arg));
   auto module = driver->Compile(sources, options);
-  return FORMAT("{~a,~w}", OK_STR, driver->PackModule(module));
+  return FORMAT("{ok,~w}", driver->PackModule(module));
 }
 
 ETERM *DriverPort::MemoryRead(ETERM *arg) {
@@ -124,14 +124,14 @@ ETERM *DriverPort::MemoryShare(ETERM *arg) {
   DEBUG("Enter DriverPort::MemoryShare");
   auto n = GetMemoryIndex(arg);
   auto mem = driver->ShareMemory(n);
-  return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(mem));
+  return FORMAT("{ok,~w}", driver->PackMemory(mem));
 }
 
 ETERM *DriverPort::MemoryLoad(ETERM *arg) {
   DEBUG("Enter DriverPort::MemoryLoad");
   auto mem = driver->Unpack<SharedMemory>(arg);
   int n = driver->LoadMemory(mem);
-  return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(n));
+  return FORMAT("{ok,~w}", driver->PackMemory(n));
 }
 
 ETERM *DriverPort::ModuleLoad(ETERM *arg) {
@@ -144,7 +144,7 @@ ETERM *DriverPort::ModuleLoad(ETERM *arg) {
 
   auto options = Unpack<LinkerOptions>(erl_element(2, arg));
   auto module = driver->LoadModule(src, options);
-  return FORMAT("{~a,~w}", OK_STR, driver->PackModule(module));
+  return FORMAT("{ok,~w}", driver->PackModule(module));
 }
 
 ETERM *DriverPort::Run(ETERM *arg) {
@@ -185,7 +185,7 @@ ETERM *DriverPort::Stream(ETERM *arg) {
 ETERM *DriverPort::MemoryLoad(RawData &data, size_t size) {
   DEBUG("Enter raw DriverPort::MemoryLoad");
   int n = driver->LoadMemory(data.get(), size);
-  return FORMAT("{~a,~w}", OK_STR, driver->PackMemory(n));
+  return FORMAT("{ok,~w}", driver->PackMemory(n));
 }
 
 std::shared_ptr<RunArguments> DriverPort::UnpackRunArguments(ETERM *term) {

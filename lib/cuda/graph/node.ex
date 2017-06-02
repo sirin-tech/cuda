@@ -37,7 +37,7 @@ defmodule Cuda.Graph.Node do
     assigns: assigns
   }
 
-  @callback __assigns__(opts :: options, env :: Cuda.Env.t) :: map | keyword
+  @callback __assigns__(id :: Graph.id, opts :: options, env :: Cuda.Env.t) :: map | keyword
 
   @doc """
   Provides a node protocol that is a structurethat holds node data.
@@ -93,10 +93,10 @@ defmodule Cuda.Graph.Node do
       import unquote(__MODULE__), only: unquote(@exports)
       import Cuda.Graph.NodeProto, only: [assign: 3]
       @behaviour unquote(__MODULE__)
-      def __assigns__(_opts, _env), do: %{}
+      def __assigns__(_id, _opts, _env), do: %{}
       def __proto__(), do: unquote(__MODULE__)
       def __compile__(node), do: {:ok, node}
-      defoverridable __assigns__: 2, __compile__: 1, __proto__: 0
+      defoverridable __assigns__: 3, __compile__: 1, __proto__: 0
     end
   end
 
@@ -194,8 +194,8 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph.Node do
         Cuda.compile_error("Reserved node name '#{id}' used")
       end
 
-      assigns = case function_exported?(module, :__assigns__, 2) do
-        true -> module.__assigns__(opts, env) |> Enum.into(%{})
+      assigns = case function_exported?(module, :__assigns__, 3) do
+        true -> module.__assigns__(id, opts, env) |> Enum.into(%{})
         _    -> %{}
       end
       assigns = Map.merge(assigns, %{options: opts, env: env})

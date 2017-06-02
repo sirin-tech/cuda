@@ -20,6 +20,18 @@ defmodule Cuda.Template.Helpers do
   def var(ctx, var_name) do
     with nil <- Context.find_assign(ctx, [:vars, var_name]) do
       get_in(ctx.assigns, [:vars, var_name])
+    end |> IO.inspect(label: "VAR #{inspect var_name}")
+  end
+
+  defmacro var(var_name) do
+    quote do
+      var(var!(ctx), unquote(var_name))
+    end
+  end
+
+  defmacro env(var_name) do
+    quote do
+      env(var!(ctx), unquote(var_name))
     end
   end
 end

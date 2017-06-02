@@ -63,7 +63,7 @@ void ErlangPort::WritePacketLength(uint32_t len) {
 #define RAW_PACKET 2
 
 void ErlangPort::WriteTermPacket(ETERM *packet) {
-  auto len = erl_term_len(result);
+  auto len = erl_term_len(packet);
   uint8_t type = TERM_PACKET;
   std::string buf(len, 0);
   erl_encode(packet, (unsigned char *)buf.c_str());
