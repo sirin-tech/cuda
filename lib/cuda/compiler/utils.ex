@@ -4,6 +4,7 @@ defmodule Cuda.Compiler.Utils do
   import Node, only: [input_pin_types: 0, output_pin_types: 0]
 
   def put_pins_shapes(%{assigns: %{pin_offsets: offsets}} = node) do
+    #IO.inspect({node.id, offsets})
     size = case Map.get(node.assigns, :pin_size) do
       nil  -> node.pins |> Enum.map(&Pin.data_size/1) |> Enum.reduce(0, &+/2)
       size -> size
@@ -12,13 +13,15 @@ defmodule Cuda.Compiler.Utils do
     pins = if o == Enum.uniq(o) do
       node.pins |> pins_shape(offsets, size)
     else
+      #IO.inspect({:SAME, o})
       inputs  = node
                 |> NodeProto.pins(input_pin_types())
                 |> pins_shape(offsets, size)
       outputs = node
                 |> NodeProto.pins(output_pin_types())
                 |> pins_shape(offsets, size)
-      Memory.merge(inputs, outputs)
+      %Memory{vars: inputs.vars ++ outputs.vars}
+      #Memory.merge(inputs, outputs)
     end
     memory = node.assigns
              |> Map.get(:memory, %{})

@@ -7,14 +7,16 @@ defmodule Cuda.Graph.Pin do
   require Logger
 
   @type type :: :input | :output | :producer | :consumer
+  @type layout :: :fixed | :floating
 
   @type t :: %__MODULE__{
     id: Graph.id,
     type: type,
+    layout: layout,
     data_type: any
   }
 
-  defstruct [:id, :type, :data_type]
+  defstruct [:id, :type, :data_type, layout: :floating]
 
   def data_size(%__MODULE__{data_type: data_type}) do
     type_size(data_type)

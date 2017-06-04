@@ -5,7 +5,7 @@ defimpl Cuda.Runner, for: Cuda.Graph do
   import Cuda.Graph.Node, only: [input_pin_types: 0]
 
   def load(%{type: :computation_graph, assigns: assigns} = graph, opts) do
-    with cuda when is_pid(cuda) <- Keyword.get(opts, :cuda) do
+    with cuda when not is_nil(cuda) <- Keyword.get(opts, :cuda) do
       # load cubin into GPU
       {:ok, module} = Cuda.module_load(cuda, assigns.cubin)
       # load args into GPU
@@ -41,11 +41,8 @@ defimpl Cuda.Runner, for: Cuda.Graph do
   end
 
   def run(%{type: :computation_graph, assigns: assigns}, inputs, opts) do
-    with cuda when is_pid(cuda) <- Keyword.get(opts, :cuda) do
+    with cuda when not is_nil(cuda) <- Keyword.get(opts, :cuda) do
       # get input and convert it to binary
-      #pins = inputs
-      #       |> Cuda.Compiler.Utils.wrap_pins
-      #       |> Pin.pack(assigns.inputs_shape)
       pins = Memory.pack(inputs, assigns.memory.pins)
       # load pins into GPU
       {:ok, mpins} = Cuda.memory_load(cuda, pins)
@@ -67,6 +64,8 @@ defimpl Cuda.Runner, for: Cuda.Graph do
       #IO.inspect({assigns.cuda_module, batches})
       :ok = Cuda.stream(cuda, assigns.cuda_module, batches)
       {:ok, pins} = Cuda.memory_read(cuda, mpins)
+      #IO.inspect(for <<x::float-little-32 <- pins>>, do: x)
+      #IO.inspect(byte_size(pins))
       output = pins |> Memory.unpack(assigns.memory.pins)
       {:ok, output}
     else

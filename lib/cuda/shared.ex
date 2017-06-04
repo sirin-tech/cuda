@@ -92,19 +92,16 @@ defmodule Cuda.Shared do
 
   def handle_call(:vars, _from, %{ref: ref} = st) when not is_nil(ref) do
     result = with {:ok, data} <- Cuda.memory_read(st.cuda, ref) do
-      vars = st.extracts |> Enum.reduce(%{}, fn {name, {o, s, t}}, vars ->
-        data = data |> :binary.part({o, s}) |> Pin.unpack(t)
-        Map.put(vars, name, data)
-      end)
-      {:ok, vars}
+      {:ok, Memory.unpack(data, st.memory)}
     end
     {:reply, result, st}
   end
 
   defp load_vars(_, %{memory: nil} = st), do: {:ok, st}
   defp load_vars(vars, %{memory: memory} = st) do
-    IO.inspect({vars, memory})
+    #IO.inspect({vars, memory})
     bin = Memory.pack(vars, memory)
+    #IO.inspect({memory, vars, (for <<x::float-little-32 <- bin>>, do: x)})
     if byte_size(bin) > 0 do
       unload = case st.ref do
         nil -> :ok

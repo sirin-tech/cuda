@@ -131,9 +131,11 @@ defmodule Cuda.Graph do
     # node to node connection
     with {:src, %{} = src_node} <- {:src, GraphProto.node(graph, sn)},
          {:dst, %{} = dst_node} <- {:dst, GraphProto.node(graph, dn)} do
+      #IO.inspect({src, dst})
       src_pin = assert_pin_type(src_node, sp, output_pin_types())
       dst_pin = assert_pin_type(dst_node, dp, input_pin_types())
       assert_pin_data_type(src_pin, dst_pin)
+      assert_pin_layout(src_pin, dst_pin)
       %{graph | links: [{src, dst} | links]}
     else
       {:src, _} -> compile_error("Source node `#{sn}` not found")
@@ -144,9 +146,11 @@ defmodule Cuda.Graph do
   def link(%__MODULE__{links: links} = graph, src, {dn, dp} = dst) do
     # input to node connection
     with %{} = dst_node <- GraphProto.node(graph, dn) do
+      #IO.inspect({graph.id, src, dst})
       src_pin = assert_pin_type(graph, src, input_pin_types())
       dst_pin = assert_pin_type(dst_node, dp, input_pin_types())
       assert_pin_data_type(src_pin, dst_pin)
+      assert_pin_layout(src_pin, dst_pin)
       %{graph | links: [{{@self, src}, dst} | links]}
     else
       _ -> compile_error("Destination node `#{dn}` not found")
@@ -159,6 +163,7 @@ defmodule Cuda.Graph do
       src_pin = assert_pin_type(graph, dst, output_pin_types())
       dst_pin = assert_pin_type(src_node, sp, output_pin_types())
       assert_pin_data_type(src_pin, dst_pin)
+      assert_pin_layout(src_pin, dst_pin)
       %{graph | links: [{src, {@self, dst}} | links]}
     else
       _ -> compile_error("Source node `#{sn}` not found")
@@ -170,6 +175,7 @@ defmodule Cuda.Graph do
     src_pin = assert_pin_type(graph, src, input_pin_types())
     dst_pin = assert_pin_type(graph, dst, output_pin_types())
     assert_pin_data_type(src_pin, dst_pin)
+    assert_pin_layout(src_pin, dst_pin)
     %{graph | links: [{{@self, src}, {@self, dst}} | links]}
   end
 
@@ -199,6 +205,11 @@ defmodule Cuda.Graph do
       compile_error("The pins #{p1.id} and #{p2.id} has different types")
     end
   end
+
+  defp assert_pin_layout(%{id: id1, layout: l1}, %{id: id2, layout: l2}) when l1 != l2 do
+    compile_error("The pins #{id1} and #{id2} has different layout")
+  end
+  defp assert_pin_layout(_, _), do: true
 end
 
 defimpl Cuda.Graph.Factory, for: Cuda.Graph do

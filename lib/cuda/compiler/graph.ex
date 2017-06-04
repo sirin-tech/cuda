@@ -1,6 +1,7 @@
 defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   alias Cuda.Graph.{Node, Pin, NodeProto, GraphProto, Processing}
   alias Cuda.Compiler.{Context, GPUUnit}
+  alias Cuda.Template.PtxHelpers
 
   require Integer
   require Cuda
@@ -17,7 +18,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
             |> collect_offsets(chains)
             |> put_pins_shapes()
             |> collect_sources(ctx)
-            |> collect_batches(chains)
+            |> collect_batches(ctx, chains)
     #IO.inspect(graph.assigns)
     #Cuda.Graph.Visualize.Dot.render(graph, output: "/tmp/t.svg")
     {:ok, graph}
@@ -60,24 +61,46 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     end, st, ids: true)
     with {:ok, st} <- result do
       st.chains
+      |> Enum.reject(& &1 == [])
       |> Enum.reverse
-      |> Enum.map(& %{links: &1, size1: 0, size2: 0})
+      |> Enum.map(& %{links: &1, fixed: 0, size1: 0, size2: 0})
     end
   end
 
   defp collect_sizes(%{links: links} = chain, graph) do
-    links
-    |> Enum.map(fn
-      {{:__self__, pin}, _} ->
-        graph |> NodeProto.pin(pin) |> Pin.data_size()
-      {{node, pin}, _} ->
-        graph |> GraphProto.node(node) |> NodeProto.pin(pin) |> Pin.data_size()
+    # get all pins in the chain and add pin layout to links
+    {pins, links} = links |> Enum.reduce({[], []}, fn
+      {{:__self__, pin} = src, dst}, {pins, links} ->
+        pin = graph |> NodeProto.pin(pin)
+        {pins ++ [pin], links ++ [{src, dst, pin.layout}]}
+      {{node, pin} = src, dst}, {pins, links} ->
+        pin = graph |> GraphProto.node(node) |> NodeProto.pin(pin)
+        {pins ++ [pin], links ++ [{src, dst, pin.layout}]}
     end)
-    |> Enum.with_index
-    |> Enum.reduce(chain, fn
-      {n, i}, chain when is_odd(i) -> %{chain | size2: max(n, chain.size2)}
-      {n, _}, chain                -> %{chain | size1: max(n, chain.size1)}
-    end)
+
+    # sum sizes of all fixed pins
+    fixed = pins
+            |> Enum.filter(& &1.layout == :fixed)
+            |> Enum.map(&Pin.data_size/1)
+            |> Enum.reduce(0, &+/2)
+    chain = %{chain | links: links, fixed: fixed}
+
+    # calculate max sizes for floating pins
+    pins
+    # get a list of pins, grouped by layout (fixed or floating)
+    |> Enum.chunk_by(& &1.type == :fixed)
+    # remove fixed groups
+    |> Enum.reject(& length(&1) > 0 and List.first(&1).type == :fixed)
+    # found max sizes for each group of floating pins
+    |> Enum.reduce(chain, fn floating, chain ->
+      floating
+      |> Enum.map(&Pin.data_size/1)
+      |> Enum.with_index
+      |> Enum.reduce(chain, fn
+        {n, i}, chain when is_odd(i) -> %{chain | size2: max(n, chain.size2)}
+        {n, _}, chain                -> %{chain | size1: max(n, chain.size1)}
+      end)
+    end)# |> IO.inspect
   end
 
   defp collect_sources(graph, ctx) do
@@ -102,41 +125,73 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   end
 
   defp collect_offsets(%{} = graph, chains) do
-    {graph, _} = chains |> Enum.reduce({graph, 0}, fn chain, {graph, chain_offset} ->
-      state = {graph, chain_offset, chain_offset + chain.size1}
+    # get total size of fixed pins in all chains
+    fixed_size = chains |> Enum.map(& &1.fixed) |> Enum.reduce(&+/2)
+    {graph, _, _} = chains |> Enum.reduce({graph, 0, fixed_size}, fn chain, {graph, fixed_offset, floating_offset} ->
+      # collect fixed pins offsets
+      state = {graph, fixed_offset}
+      {graph, fixed_offset} = chain.links |> Enum.reduce(state, fn
+        {{:__self__, src_pin}, {dst, dst_pin}, :fixed}, {graph, o} ->
+          node = GraphProto.node(graph, dst) |> put_offset(dst_pin, o)
+          graph = graph |> put_offset(src_pin, o) |> GraphProto.replace(node)
+          pin = graph |> NodeProto.pin(src_pin)
+          {graph, o + Pin.data_size(pin)}
+        {{src, src_pin}, {:__self__, dst_pin}, :fixed}, {graph, o} ->
+          node = GraphProto.node(graph, src) |> put_offset(src_pin, o)
+          graph = graph |> put_offset(dst_pin, o) |> GraphProto.replace(node)
+          pin = graph |> NodeProto.pin(src_pin)
+          {graph, o + Pin.data_size(pin)}
+        {{:__self__, src_pin}, {:__self__, dst_pin}, :fixed}, {graph, o} ->
+          graph = graph |> put_offset(src_pin, o) |> put_offset(dst_pin, o)
+          pin = graph |> NodeProto.pin(src_pin)
+          {graph, o + Pin.data_size(pin)}
+        {{src, src_pin}, {dst, dst_pin}, :fixed}, {graph, o} ->
+          src_node = GraphProto.node(graph, src)
+          pin = src_node |> NodeProto.pin(src_pin)
+          src = src_node |> put_offset(src_pin, o)
+          dst = GraphProto.node(graph, dst) |> put_offset(dst_pin, o)
+          graph = graph |> GraphProto.replace(src) |> GraphProto.replace(dst)
+          {graph, o + Pin.data_size(pin)}
+        _, state ->
+          state
+      end)
+      # collect floating pins offsets
+      state = {graph, floating_offset, floating_offset + chain.size1}
       {graph, _, _} = chain.links |> Enum.reduce(state, fn
-        {{:__self__, src_pin}, {dst, dst_pin}}, {graph, o1, o2} ->
+        {{:__self__, src_pin}, {dst, dst_pin}, :floating}, {graph, o1, o2} ->
           node = GraphProto.node(graph, dst) |> put_offset(dst_pin, o1)
           graph = graph |> put_offset(src_pin, o1) |> GraphProto.replace(node)
           {graph, o2, o1}
-        {{src, src_pin}, {:__self__, dst_pin}}, {graph, o1, o2} ->
+        {{src, src_pin}, {:__self__, dst_pin}, :floating}, {graph, o1, o2} ->
           node = GraphProto.node(graph, src) |> put_offset(src_pin, o1)
           graph = graph |> put_offset(dst_pin, o1) |> GraphProto.replace(node)
           {graph, o2, o1}
-        {{:__self__, src_pin}, {:__self__, dst_pin}}, {graph, o1, o2} ->
+        {{:__self__, src_pin}, {:__self__, dst_pin}, :floating}, {graph, o1, o2} ->
           graph = graph |> put_offset(src_pin, o1) |> put_offset(dst_pin, o1)
           {graph, o2, o1}
-        {{src, src_pin}, {dst, dst_pin}}, {graph, o1, o2} ->
+        {{src, src_pin}, {dst, dst_pin}, :floating}, {graph, o1, o2} ->
           src = GraphProto.node(graph, src) |> put_offset(src_pin, o1)
           dst = GraphProto.node(graph, dst) |> put_offset(dst_pin, o1)
           graph = graph |> GraphProto.replace(src) |> GraphProto.replace(dst)
           {graph, o2, o1}
+        _, state ->
+          state
       end)
       pin_size = chain.size1 + chain.size2
       size = Map.get(graph.assigns, :pin_size, 0) + pin_size
-      {graph |> NodeProto.assign(:pin_size, size), chain_offset + pin_size}
+      {graph |> NodeProto.assign(:pin_size, size), fixed_offset, floating_offset + pin_size}
     end)
     graph
   end
 
-  defp collect_batches(graph, chains) do
+  defp collect_batches(graph, ctx, chains) do
     batches = chains |> Enum.map(fn
-      %{links: [{{:__self__, _}, {dst, _}} = link]} ->
+      %{links: [{{:__self__, _}, {dst, _}, _} = link]} ->
         [{:copy, link}, {:event, Node.string_id(dst)}]
-      %{links: [{{:__self__, _}, _} | links]} ->
+      %{links: [{{:__self__, _}, _, _} | links]} ->
         batch = reduce_batches([], links, graph, chains)
         add_final_event(batch, links)
-      %{links: [{{node_id, _}, _} | links]} ->
+      %{links: [{{node_id, _}, _, _} | links]} ->
         batch = case dependency(chains, node_id) do
           nil    -> compile_error("Can't find dependency for node #{node_id}")
           dep_id -> [{:wait, dep_id}]
@@ -147,7 +202,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     {batches, sources} = batches |> Enum.map_reduce([], fn batch, sources ->
       batch |> Enum.map_reduce(sources, fn
         {:copy, link}, sources ->
-          {name, ptx, size} = copy_ptx(graph, link)
+          {name, ptx, size} = copy_ptx(graph, ctx, link)
           {{:run, {name, {1, 1, 1}, {size, 1, 1}, []}}, [{:ptx, ptx} | sources]}
         batch, sources -> {batch, sources}
       end)
@@ -156,7 +211,7 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     NodeProto.assign(graph, batches: batches, sources: sources)
   end
 
-  defp copy_ptx(graph, {src, dst}) do
+  defp copy_ptx(graph, ctx, {src, dst, _}) do
     {src_offset, pin} = case src do
       {:__self__, pin} ->
         {graph.assigns.pin_offsets[pin], NodeProto.pin(graph, pin)}
@@ -175,29 +230,26 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
     size = Pin.data_size(pin)
     type_size = div(size, Pin.data_arity(pin))
     name = "copy_#{UUID.uuid1()}" |> String.replace("-", "")
-    ptx = """
-    .version 5.0
-    .target sm_30
-    .address_size 64
-    .visible .entry #{name} (.param .u64 .ptr pins) {
-      .reg .u64 %pins, %out;
-      .reg .u32 %x;
-      .reg .#{type} %f;
-      ld.param.u64 %pins, [pins];
-      mov.u32 %x, %ctaid.x;
-      mad.wide.u32 %pins, %x, #{type_size}, %pins;
-      add.u64 %out, %pins, #{type_size * dst_offset};
-      add.u64 %pins, %pins, #{type_size * src_offset};
-      ld.global.#{type} %f, [%pins];
-      st.global.#{type} [%out], %f;
-      ret;
-    }
+    ptx = PtxHelpers.header(ctx) <> """
+      .visible .entry #{name} (.param .u64 .ptr pins) {
+        .reg .u64 %pins, %out;
+        .reg .u32 %x;
+        .reg .#{type} %f;
+        ld.param.u64 %pins, [pins];
+        mov.u32 %x, %ctaid.x;
+        mad.wide.u32 %pins, %x, #{type_size}, %pins;
+        add.u64 %out, %pins, #{type_size * dst_offset};
+        add.u64 %pins, %pins, #{type_size * src_offset};
+        ld.global.#{type} %f, [%pins];
+        st.global.#{type} [%out], %f;
+        ret;
+      }
     """# |> IO.puts
     {name, ptx, Pin.data_arity(pin)}
   end
 
   defp reduce_batches(batch, links, graph, chains) do
-    links |> Enum.reduce(batch, fn {{node_id, _}, _}, batch ->
+    links |> Enum.reduce(batch, fn {{node_id, _}, _, _}, batch ->
       deps = chains |> dependencies(node_id) |> Enum.map(& {:wait, &1})
       node = GraphProto.node(graph, node_id)
       batch = batch ++ deps ++ Map.get(node.assigns, :batch, [])
@@ -209,17 +261,17 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
   end
 
   defp add_final_event(batch, links) do
-    with {_, {:__self__, _}} <- links |> List.last do
+    with {_, {:__self__, _}, _} <- links |> List.last do
       batch
     else
-      {_, {node_id, _}} = link ->
+      {_, {node_id, _}, _} = link ->
         batch ++ [{:copy, link}, {:event, Node.string_id(node_id)}]
     end
   end
 
   defp dependencies(chains, node_id) do
     chains |> Enum.reduce([], fn %{links: links}, chains ->
-      with {_, {^node_id, _}} <- List.last(links) do
+      with {_, {^node_id, _}, :floating} <- List.last(links) do
         chains ++ [Node.string_id(node_id)]
       else
         _ -> chains
@@ -229,19 +281,21 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph do
 
   defp dependency(chains, node_id) do
     chains |> Enum.find_value(fn
-      %{links: [{{^node_id, _}, _} | _]} -> false
+      %{links: [{{^node_id, _}, _, _} | _]} -> false
       %{links: links} ->
         Enum.find_value(links, fn
-          {{^node_id, _}, _} -> Node.string_id(node_id)
-          _                  -> false
+          {{^node_id, _}, _, :floating} -> Node.string_id(node_id)
+          _                             -> false
         end)
     end)
   end
 
   defp dependend(chains, node_id) do
     chains |> Enum.reduce([], fn
-      {%{links: [{{^node_id, _} = src, dst} | _]}, _}, list -> [{dst, src} | list]
-      _, list -> list
+      {%{links: [{{^node_id, _} = src, dst, :floating} | _]}, _}, list ->
+        [{dst, src} | list]
+      _, list ->
+        list
     end)
   end
 
@@ -311,6 +365,7 @@ defimpl Cuda.Compiler.Unit, for: Cuda.Graph do
       nodes = nodes
               |> Enum.map(fn {node, _pin} -> node end)
               |> Enum.reject(& &1 == gid)
+              |> Enum.uniq()
               |> Enum.map(& GraphProto.node(graph, &1))
       %{graph | nodes: nodes}
     else

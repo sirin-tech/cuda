@@ -39,13 +39,25 @@ defmodule Cuda.Worker do
   #end
 
   defp load_graph(st, opts) do
-    ctx = %Context{}
+    env = Keyword.get(opts, :env, %Cuda.Env{})
+    env = with {:ok, info} <- Cuda.device_info(st.cuda) do
+      %{env | gpu_info: info}
+    else
+      _ -> env
+    end
+    vars = %{float_size: env.float_size, f: Cuda.Env.f(env)}
+    ctx = %Context{env: env, assigns: %{vars: vars}}
     args = case Keyword.get(opts, :shared) do
       nil ->
         %{}
       shared ->
         shared
-        |> Enum.map(fn {k, pid} -> {k, Shared.share(pid)} end)
+        |> Enum.map(fn {k, pid} ->
+          with {:ok, ref} <- Shared.share(pid),
+               {:ok, mem} <- Cuda.memory_load(st.cuda, ref) do
+            {k, mem}
+          end
+        end)
         |> Enum.into(%{})
     end
     with {:ok, graph} <- Unit.compile(st.graph, ctx),

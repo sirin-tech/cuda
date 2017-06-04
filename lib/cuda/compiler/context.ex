@@ -77,8 +77,10 @@ defmodule Cuda.Compiler.Context do
   def for_node(%__MODULE__{root: nil} = ctx, child) do
     %{ctx | root: child, path: []}
   end
-  def for_node(%__MODULE__{path: path} = ctx, child) do
-    %{ctx | path: [child.id | path]}
+  def for_node(%__MODULE__{path: path} = ctx, %{id: id}) do
+    {_, with_id} = Enum.split_while(path, & &1 != id)
+    path = if with_id == [], do: [id | path], else: with_id
+    %{ctx | path: path}
   end
 
   def node(ctx, node \\ nil)

@@ -1,154 +1,23 @@
 defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
-  alias Cuda.Template
+  alias Cuda.Compiler.Context
+  alias Cuda.{Template, Template.PtxHelpers}
   alias Cuda.Graph.{Node, NodeProto}
 
   import Cuda.Compiler.Utils
 
-  defmodule Helpers do
-    alias Cuda.Compiler.Context
-    alias Cuda.Memory
-    use Bitwise
-    require Logger
-
-    def offset(ctx, memory, var) do
-      shape = Context.find_assign(ctx, [:memory, memory], ctx.path, &has_var?(&1, var))
-      shape = with nil <- shape do
-        get_in(ctx.assigns, [:memory, memory])
-      end# |> IO.inspect
-      with nil <- Memory.offset(shape, var) do
-        Logger.warn("Can't find offset for `#{inspect var}` in memory `#{memory}`")
-        nil
-      end
-    end
-
-    def shared_offset(ctx, var) do
-      #IO.inspect(ctx)
-      case Template.Helpers.var(ctx, :layer) do
-        nil   -> raise CompileError, description: "Layer variable is not defined"
-        layer -> offset(ctx, :shared, [var, layer])
-      end
-    end
-
-    defmacro offset(memory, var) do
-      quote do
-        offset(var!(ctx), unquote(memory), unquote(var))
-      end
-    end
-
-    defmacro shared_offset(var) do
-      quote do
-        shared_offset(var!(ctx), unquote(var))
-      end
-    end
-
-    defp has_var?(%Memory{vars: vars}, var) do
-      #IO.inspect({var, vars})
-      Keyword.has_key?(vars, var)
-    end
-    defp has_var?(map, path) when is_list(path) do
-      get_in(map, path)
-    end
-    defp has_var?(map, var) do
-      Map.has_key?(map, var)
-    end
-
-    defp current_node_id(ctx) do
-      Node.string_id(Map.get(Context.node(ctx) || %{}, :id))
-    end
-
-    def kernel(ctx, name, body, opts \\ []) do
-      params = [{:pins, :u64, [ptr: true]}] ++ Keyword.get(opts, :args, [])
-      params = params |> Enum.map(&param/1) |> Enum.join(", ")
-      ".visible .entry #{current_node_id(ctx)}__#{name} (#{params}) {\n" <>
-      body <>
-      "\n}"
-    end
-
-    def include(ctx, module, part \\ :body, opts \\ []) do
-      {part, opts} = case part do
-        opts when is_list(opts) -> {:body, opts}
-        part                    -> {part, opts}
-      end
-      with {:module, _} <- Code.ensure_loaded(module) do
-        case function_exported?(module, :__ptx__, 2) do
-          true -> module.__ptx__(part, Keyword.put(opts, :ctx, ctx))
-          _    -> ""
-        end
-      else
-        _ -> raise CompileError, description: "Couldn't compile include module #{module}"
-      end
-    end
-
-    def param({name, type, opts}) do
-      space = opts
-              |> Keyword.take(~w(const global local shared)a)
-              |> Enum.reduce([], fn
-                {name, true}, [] -> [".#{name}"]
-                _, acc           -> acc
-              end)
-      align = opts
-              |> Keyword.take(~w(align)a)
-              |> Enum.reduce([], fn
-                {:align, x}, _ when band(x, x - 1) == 0 -> [".align #{x}"]
-                _, acc                                  -> acc
-              end)
-      param = [".param", ".#{type}"] ++
-              (if Keyword.get(opts, :ptr) == true, do: [".ptr"], else: []) ++
-              space ++
-              align ++
-              ["#{name}"]
-      param |> Enum.join(" ")
-    end
-
-    defmacro defkernel(ctx, name, args, opts) do
-      body = Keyword.get(opts, :do)
-      args = args
-             |> Enum.map(&parse_arg/1)
-             |> Enum.filter(&is_tuple/1)
-             |> Macro.escape
-      quote do
-        kernel(unquote(ctx), unquote(name), unquote(body), args: unquote(args))
-      end
-    end
-    defmacro defkernel(ctx, name, opts) do
-      body = Keyword.get(opts, :do)
-      quote do
-        kernel(unquote(ctx), unquote(name), unquote(body))
-      end
-    end
-
-    defp parse_arg(arg, opts \\ [])
-    defp parse_arg({name, type}, opts) when is_atom(type) do
-      {name, type, opts}
-    end
-    defp parse_arg({name, {{:., _, [{type, _, x}, opt]}, _, _}}, opts) when is_atom(x) do
-      {name, type, [{opt, true} | opts]}
-    end
-    defp parse_arg({name, {{:., _, [nested, opt]}, _, _}}, opts) do
-      parse_arg({name, nested}, [{opt, true} | opts])
-    end
-    defp parse_arg({name, {:-, _, [{{:., _, [nested, opt]}, _, _}, v]}}, opts) do
-      parse_arg({name, nested}, [{opt, v} | opts])
-    end
-    defp parse_arg({name, {type, _, _}}, opts) when is_atom(type) do
-      {name, type, opts}
-    end
-    defp parse_arg(_, _) do
-      nil
-    end
-  end
-
   def sources(node, ctx) do
     node = put_pins_shapes(node)
-    ctx = Cuda.Compiler.Context.replace_current(ctx, node)
-    helpers = [Helpers] ++ Map.get(node.assigns, :helpers, [])
+    ctx = Context.replace_current(ctx, node)
+    helpers = [PtxHelpers] ++ Map.get(node.assigns, :helpers, [])
     opts = [context: ctx, helpers: helpers]
     ptx = case node.module.__ptx__(node) do
       src when is_bitstring(src) -> [src]
       src when is_list(src)      -> src
       _                          -> []
     end
-    ptx = ptx |> Enum.map(& Template.ptx_preprocess(&1, opts))
+    ptx = ptx
+          |> Enum.map(& Template.ptx_preprocess(&1, opts))
+          |> Enum.map(&include_header(ctx, &1))
     c = case node.module.__c__(node) do
       src when is_bitstring(src) -> [src]
       src when is_list(src)      -> src
@@ -156,6 +25,34 @@ defimpl Cuda.Compiler.GPUUnit, for: Cuda.Graph.GPUNode do
     end
     c = c |> Enum.map(& Template.c_preprocess(&1, opts))
     {:ok, NodeProto.assign(node, :sources, ptx ++ c)}
+  end
+
+  @line_re ["\n", "\r\n", "\n\r"]
+  @space_re ~r/\s+/
+  @header_directives ~w(.version .target .address_size)
+  defp include_header(ctx, {:ptx, src}) do
+    directives = src
+                 |> String.split(@line_re)
+                 |> Enum.map(&String.trim/1)
+                 |> Enum.map(&String.split(&1, @space_re))
+                 |> Enum.map(&List.first/1)
+                 |> Enum.filter(& &1 in @header_directives)
+    src = if ".address_size" in directives do
+      src
+    else
+      PtxHelpers.address_size(ctx) <> src
+    end
+    src = if ".target" in directives do
+      src
+    else
+      PtxHelpers.target(ctx) <> src
+    end
+    src = if ".version" in directives do
+      src
+    else
+      PtxHelpers.version() <> src
+    end
+    {:ptx, src}
   end
 end
 

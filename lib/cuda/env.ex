@@ -15,12 +15,12 @@ defmodule Cuda.Env do
     gpu_info: keyword
   }
 
-  defstruct [:float_size, :int_size, :optimize, gpu_info: []]
+  defstruct [float_size: 4, int_size: 1, optimize: :none, gpu_info: []]
 
   @env_var "CUDA_ENV"
   @default %{
-    float_size: 32,
-    int_size: 8,
+    float_size: 4,
+    int_size: 1,
     optimize: :none}
 
   @doc """
@@ -61,6 +61,11 @@ defmodule Cuda.Env do
   """
   @spec get_default() :: map
   def get_default(), do: @default
+
+  def f(%__MODULE__{float_size: size}) when is_integer(size) do
+    "f#{size * 8}"
+  end
+  def f(_), do: "f32"
 
   defp get_keys() do
     %__MODULE__{}

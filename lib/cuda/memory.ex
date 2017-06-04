@@ -1,5 +1,6 @@
 defmodule Cuda.Memory do
   require Logger
+  alias Cuda.Float16
 
   defmodule Shape do
     defstruct [:type, skip: 0]
@@ -9,14 +10,32 @@ defmodule Cuda.Memory do
   defstruct type: :owned, vars: []
 
   def new(vars, type \\ :owned) do
-    {vars, _} = Enum.reduce(vars, {%{}, 0}, fn
+    {vars, _} = Enum.reduce(vars, {[], 0}, fn
       {k, {o, _} = v}, {vars, offset} when is_integer(o) ->
-        {Map.put(vars, k, v), offset}
+        {vars ++ [{k, v}], offset}
       {k, type}, {vars, offset} ->
-        IO.inspect({k, offset, size(type)})
-        {Map.put(vars, k, {offset, type}), offset + size(type)}
+        {vars ++ [{k, {offset, type}}], offset + size(type)}
     end)
     %__MODULE__{vars: vars, type: type}
+  end
+
+  def get(%__MODULE__{vars: vars}, key, default \\ nil) do
+    with {_, v} <- get_var(vars, key, default), do: v
+  end
+
+  def has_key?(%__MODULE__{vars: vars}, key) do
+    Enum.any?(vars, fn
+      {^key, _} -> true
+      _         -> false
+    end)
+  end
+
+  defp get_var(vars, key, default) do
+    with {_, v} <- Enum.find(vars, fn {k, _} -> k == key end) do
+      v
+    else
+      _ -> default
+    end
   end
 
   def offset(nil, _), do: nil
@@ -52,10 +71,6 @@ defmodule Cuda.Memory do
   def offset(shape, []), do: size(shape)
   def offset(shape, field), do: offset(shape, [field])
 
-  def merge(%__MODULE__{vars: a}, %__MODULE__{vars: b}) do
-    %__MODULE__{vars: Keyword.merge(a, b)}
-  end
-
   def pack(:zero, t) when is_atom(t) or is_bitstring(t), do: pack(0, t)
   def pack(_, {:skip, bytes}), do: <<0::unit(8)-size(bytes)>>
   def pack(x, :i8), do: <<x>>
@@ -74,11 +89,10 @@ defmodule Cuda.Memory do
   def pack(x, "u16"), do: pack(x, :u16)
   def pack(x, "u32"), do: pack(x, :u32)
   def pack(x, "u64"), do: pack(x, :u64)
-  # TODO: pack 16-bit floats
-  # def pack(x, :f16), do: <<x::float-little-size(16)>>
+  def pack(x, :f16), do: Float16.pack(x)
   def pack(x, :f32), do: <<x::float-little-size(32)>>
   def pack(x, :f64), do: <<x::float-little-size(64)>>
-  # def pack(x, "f16"), do: pack(x, :f16)
+  def pack(x, "f16"), do: pack(x, :f16)
   def pack(x, "f32"), do: pack(x, :f32)
   def pack(x, "f64"), do: pack(x, :f64)
   def pack(x, {type, arity}) when not is_tuple(arity), do: pack(x, {type, {arity}})
@@ -117,6 +131,21 @@ defmodule Cuda.Memory do
     end)
     |> Enum.join()
   end
+  def pack(%{} = x, %Shape{type: type, skip: %{} = skip}) do
+    x
+    |> Map.to_list()
+    |> Enum.reduce("", fn {key, val}, acc ->
+      t = Map.get(type, key)
+      s = Map.get(skip, key)
+      acc <> pack(val, %Shape{type: t, skip: s})
+    end)
+  end
+  def pack(x, %Shape{type: type, skip: {sbefore, safter}}) do
+    pack(0, {:skip, sbefore}) <> pack(x, type) <> pack(0, {:skip, safter})
+  end
+  def pack(x, %Shape{type: type, skip: skip}) when is_integer(skip) do
+    pack(x, type) <> pack(0, {:skip, skip})
+  end
   def pack(x, types) when is_map(types) and is_map(x) do
     types
     |> Enum.map(fn {k, type} ->
@@ -133,12 +162,6 @@ defmodule Cuda.Memory do
   end
   def pack(nil, type) do
     Logger.warn("Attempt to pack `nil` value for type #{inspect type}")
-  end
-  def pack(x, %Shape{type: type, skip: {sbefore, safter}}) do
-    pack(0, {:skip, sbefore}) <> pack(x, type) <> pack(0, {:skip, safter})
-  end
-  def pack(x, %Shape{type: type, skip: skip}) when is_integer(skip) do
-    pack(x, type) <> pack(0, {:skip, skip})
   end
   def pack(_, _), do: <<>>
 
@@ -158,21 +181,22 @@ defmodule Cuda.Memory do
   def unpack(x, "u16"), do: unpack(x, :u16)
   def unpack(x, "u32"), do: unpack(x, :u32)
   def unpack(x, "u64"), do: unpack(x, :u64)
-  # TODO: pack 16-bit floats
-  # def pack(x, :f16), do: <<x::float-little-size(16)>>
+  def unpack(x, :f16), do: Float16.unpack(x)
   def unpack(<<x::float-little-size(32)>>, :f32), do: x
   def unpack(<<x::float-little-size(64)>>, :f64), do: x
-  # def pack(x, "f16"), do: pack(x, :f16)
+  def unpack(x, "f16"), do: unpack(x, :f16)
   def unpack(x, "f32"), do: unpack(x, :f32)
   def unpack(x, "f64"), do: unpack(x, :f64)
   def unpack(x, {type, arity}) when is_tuple(arity) do
     arity = arity |> Tuple.to_list |> Enum.reverse
     {list, _} = unpack_list(x, {type, arity})
     list
+    |> unp_flat()
   end
   def unpack(x, {type, arity}) when not is_tuple(arity) do
     {list, _} = unpack_list(x, {type, [arity]})
     list
+    |> unp_flat()
   end
   def unpack(x, types) when is_list(types) do
     {list, _} = types |> Enum.reduce({[], x}, fn
@@ -183,16 +207,32 @@ defmodule Cuda.Memory do
         acc
     end)
     list
+    |> unp_flat()
   end
-  def unpack(x, types) when is_map(types) do
-    {list, _} = types |> Enum.reduce({%{}, x}, fn
-      {k, type}, {map, rest} ->
-        {[data], rest} = unpack_list(rest, type)
-        {Map.put(map, k, data), rest}
-      _, acc ->
-        acc
+  def unpack(x, %__MODULE__{vars: vars}) do
+    vars
+    |> Enum.map(fn {k, {offset, type}} ->
+      x = x
+          |> binary_part(offset, size(type))
+          |> unpack(type)
+      {k, x}
     end)
-    list
+    |> Enum.into(%{})
+  end
+  def unpack(x, %Shape{type: %{} = type, skip: %{} = skip}) do
+    type = type
+    |> Map.to_list()
+    |> Enum.map(fn {key, val} ->
+      val = is_list(val) && val || [val]
+      case Map.get(skip, key, 0)  do
+        {sbefore, safter} -> {key, [{:skip, sbefore} | val] ++ [{:skip, safter}]}
+        0                 -> {key, val}
+        s                 -> {key, val ++ [{:skip, s}]}
+      end
+    end)
+    |> Enum.into(%{})
+    x
+    |> unpack(type)
   end
   def unpack(x, %Shape{type: type, skip: {sbefore, safter}}) do
     size = byte_size(x) - sbefore - safter
@@ -204,6 +244,17 @@ defmodule Cuda.Memory do
     size = byte_size(x) - skip
     <<data::binary-size(size), _::binary>> = x
     unpack(data, type)
+  end
+  def unpack(x, types) when is_map(types) do
+    {list, _} = types |> Enum.reduce({%{}, x}, fn
+      {k, type}, {map, rest} ->
+        {[data], rest} = unpack_list(rest, type)
+        {Map.put(map, k, data), rest}
+      _, acc ->
+        acc
+    end)
+    list
+    |> unp_flat()
   end
   def unpack(_, _), do: nil
 
@@ -237,6 +288,15 @@ defmodule Cuda.Memory do
     {[unpack(x, type)], rest}
   end
 
+  defp unp_flat(%{} = value) do
+    value
+    |> Map.to_list()
+    |> Enum.map(fn {k, v} -> {k, unp_flat(v)} end)
+    |> Enum.into(%{})
+  end
+  defp unp_flat([value]) when is_list(value), do: unp_flat(value)
+  defp unp_flat(value),                       do: value
+
   @type_re ~r/(\d+)/
   def size(:i8),  do: 1
   def size(:i16), do: 2
@@ -266,12 +326,29 @@ defmodule Cuda.Memory do
   def size(l) when is_list(l) do
     l |> Enum.map(&size/1) |> Enum.reduce(0, &+/2)
   end
+  def size(%__MODULE__{vars: vars}) do
+    vars |> Enum.reduce(0, fn {_, {_, t}}, a -> a + size(t) end)
+  end
   def size(%Shape{type: nil}), do: 0
+  def size(%Shape{type: type, skip: %{} = skip}) do
+    ssize = skip
+    |> Map.to_list()
+    |> Enum.reduce(0, fn
+      {_, {v1, v2}}, acc -> acc + v1 + v2
+      {_, v}, acc        -> acc + v
+    end)
+    size(type) + ssize
+  end
   def size(%Shape{type: type, skip: {sbefore, safter}}) do
     size({:skip, sbefore + safter}) + size(type)
   end
   def size(%Shape{type: type, skip: skip}) when is_integer(skip) do
     size({:skip, skip}) + size(type)
+  end
+  def size(m) when is_map(m) do
+    m
+    |> Enum.map(fn {_, v} -> size(v) end)
+    |> Enum.reduce(0, &+/2)
   end
   def size(_), do: 0
 
