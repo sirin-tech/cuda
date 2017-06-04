@@ -588,7 +588,8 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp mv_add_node(graph, %{id: nid} = node, dict) do
     graph = %{graph | nodes: [node | graph.nodes]}
-    links = Map.to_list(dict)
+    links = dict
+    |> Map.to_list()
     |> Enum.reduce(graph.links, fn {npid, gpid}, links ->
       %{type: type} = NodeProto.pin(node, npid)
       newlink = cond do
