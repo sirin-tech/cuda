@@ -1,7 +1,7 @@
 defmodule Cuda.Memory do
   require Logger
 
-  use Cuda.Float16
+  alias Cuda.Float16
 
   defmodule Shape do
     defstruct [:type, skip: 0]

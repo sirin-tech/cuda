@@ -349,6 +349,22 @@ defmodule Cuda.Graph.ProcessingTest do
       assert Enum.any?(n, &(&1.id == pin.id))
     end
 
+    test "Node and nested graph have links from the same output, when node moved to the nested graph no pins created for this link, but redirected to existing one" do
+      graph = nested_graph(:network_test)
+      graph = move(graph, :nested, [:conv, :fc, :error, :back_fc])
+      pin = Enum.reduce(graph.links, nil, fn
+        {{:__self__, :input}, {:nested, pin}}, _ -> pin
+        _, acc                                   -> acc
+      end)
+      graph = move(graph, :nested, :back_conv)
+      nested = Enum.find(graph.nodes, nil, & &1.id == :nested)
+
+      assert not is_nil(Enum.find(nested.links, fn
+        {{:__self__, ^pin}, {:back_conv, :input1}} -> true
+        _                                          -> false
+      end))
+    end
+
     test "general test" do
       # [i1]──▶[input (a) output]──▶[input (b) output]──▶[input (c) output]──▶[o1]
       graph = nested_graph(:i1_single3_o1)
