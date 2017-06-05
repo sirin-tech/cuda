@@ -3,7 +3,7 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
 
   import Cuda.Test.CudaHelpers
 
-  alias Cuda.Compiler.{Context, GPUUnit}
+  alias Cuda.Compiler.GPUUnit
   alias Cuda.Graph.{NodeProto, GPUNode}
   alias Cuda.Graph.Factory
   alias Cuda.Memory
@@ -20,7 +20,7 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
 
   defp gen_ptx(text, opts \\ []) do
     node = new_node(text) |> NodeProto.assign(Keyword.get(opts, :node_assigns, %{}))
-    ctx = %Context{root: node, path: [], assigns: Keyword.get(opts, :ctx_assigns, %{})}
+    ctx = context(root: node, path: [], assigns: Keyword.get(opts, :ctx_assigns, %{}))
     {:ok, %{assigns: %{sources: [{:ptx, ptx}]}}} = GPUUnit.sources(node, ctx)
     parse_ptx(ptx)
   end
@@ -34,12 +34,16 @@ defmodule Cuda.Compiler.GPUNodePTXHelpersTest do
 
   describe "shared_offset/2" do
     test "returns shared offset" do
-      assigns = %{
-        vars: %{layer: :node},
-        memory: %{shared: %Memory{vars: [{:node, {10, %{a: :i16, b: :i32}}}]}}
-      }
+      memory = %Memory{vars: [
+        {:a, {10, %{node1: :i16, node2: :i32}}},
+        {:b, {30, %{node1: :i16, node2: :i32}}}
+      ]}
+      assigns = %{vars: %{layer: :node1}, memory: %{shared: memory}}
       assert gen_ptx(~s{<%= shared_offset(ctx, :a) %>}, ctx_assigns: assigns) == ["10"]
-      assert gen_ptx(~s{<%= shared_offset(ctx, :b) %>}, ctx_assigns: assigns) == ["12"]
+      assert gen_ptx(~s{<%= shared_offset(ctx, :b) %>}, ctx_assigns: assigns) == ["30"]
+      assigns = %{vars: %{layer: :node2}, memory: %{shared: memory}}
+      assert gen_ptx(~s{<%= shared_offset(ctx, :a) %>}, ctx_assigns: assigns) == ["12"]
+      assert gen_ptx(~s{<%= shared_offset(ctx, :b) %>}, ctx_assigns: assigns) == ["32"]
     end
   end
 

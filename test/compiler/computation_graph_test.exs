@@ -30,7 +30,9 @@ defmodule Cuda.Compiler.ComputationGraphTest do
               |> Cuda.Graph.link({:node2, :o}, :go)
       ctx = context(root: graph, vars: %{x: 10})
       {:ok, %{assigns: %{sources: sources}}} = GPUUnit.sources(graph, ctx)
-      assert sources == [{:ptx, "node2-8-0"}, {:ptx, "node1-0-8"}]
+      [{:ptx, n1}, {:ptx, n2}] = sources
+      assert parse_ptx(n1) == ["node2-8-0"]
+      assert parse_ptx(n2) == ["node1-0-8"]
     end
   end
 end

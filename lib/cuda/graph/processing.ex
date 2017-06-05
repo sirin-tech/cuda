@@ -554,6 +554,7 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     %{srcg | nodes: nodes}
   end
   def move(srcg, %{id: dstg_id} = dstg, %{id: nid} = node) do
+    {srcg, dstg} = mv_common_inputs(srcg, dstg, node)
     {srcg, dstg} = mv_shared_links(srcg, dstg, node)
     {dictpins, dstg} = dstg
     |> mv_copy_pins(mv_pins_to_copy(srcg, dstg, node))
@@ -568,12 +569,14 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   end
   def move(srcg, _, []), do: srcg
   def move(srcg, dstg_id, [node_id | rest]) do
-    dstg = mv_get_node(srcg, dstg_id)
-    node = mv_get_node(srcg, node_id)
-    srcg = move(srcg, dstg, node)
-    move(srcg, dstg_id, rest)
+    # dstg = mv_get_node(srcg, dstg_id)
+    # node = mv_get_node(srcg, node_id)
+    # srcg = move(srcg, dstg, node)
+    srcg
+    |> move(dstg_id, node_id)
+    |> move(dstg_id, rest)
   end
-  def move(srcg, dstg_id, node_id) do
+  def move(srcg, dstg_id, node_id) when dstg_id != node_id do
     dstg = mv_get_node(srcg, dstg_id)
     node = mv_get_node(srcg, node_id)
     move(srcg, dstg, node)
@@ -588,7 +591,8 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
 
   defp mv_add_node(graph, %{id: nid} = node, dict) do
     graph = %{graph | nodes: [node | graph.nodes]}
-    links = Map.to_list(dict)
+    links = dict
+    |> Map.to_list()
     |> Enum.reduce(graph.links, fn {npid, gpid}, links ->
       %{type: type} = NodeProto.pin(node, npid)
       newlink = cond do
@@ -685,6 +689,50 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     mv_shared_links(srcg, dstg, node, rest)
   end
 
+  defp mv_common_inputs(srcg, %{id: did} = dstg, %{id: node_id} = node) do
+    # Ищем по исходному графу линки которые идут на вход графа назначения
+    dlinks = Enum.reduce(srcg.links, %{}, fn
+      {{nid, npid}, {^did, dpid}}, acc when nid != node_id ->
+        Map.put(acc, {nid, npid}, {:__self__, dpid})
+      _, acc ->
+        acc
+    end)
+    if (dlinks |> Map.keys() |> length()) > 0,
+      do: mv_common_inputs(srcg, dstg, node, dlinks),
+    else: {srcg, dstg}
+  end
+  defp mv_common_inputs(srcg, dstg, %{id: node_id} = node, dlinks) do
+    # Ищем по исходному графу линки идущие на вход ноды от выходов, которые
+    # так же соединены с входами графа назначения
+    common = Enum.reduce(srcg.links, [], fn
+      {other, {^node_id, _}} = link, acc ->
+        if Map.has_key?(dlinks, other)  do
+          [link | acc]
+        else
+          acc
+        end
+      _, acc ->
+        acc
+    end)
+    mv_common_inputs(srcg, dstg, node, dlinks, common)
+  end
+  defp mv_common_inputs(srcg, dstg, _, _, []), do: {srcg, dstg}
+  defp mv_common_inputs(srcg, dstg, _, dlinks, common) do
+    # Удаляем из исходного графа общие линки
+    srcg = %{srcg | links: mv_list_remove(srcg.links, common)}
+    # Добавляем линки в граф назначения, с перенаправлением на
+    # его существующие пины
+    dstg = %{dstg | links: Enum.reduce(common, dstg.links, fn {key, other}, acc ->
+      [{dlinks[key], other} | acc]
+    end)}
+    {srcg, dstg}
+  end
+
+  defp mv_list_remove(list, []), do: list
+  defp mv_list_remove(list, rm) do
+    Enum.reduce(rm, list, & List.delete(&2, &1))
+  end
+
   #-----------------------------------------------------------------------------
   # precompile_wrap
   #-----------------------------------------------------------------------------
@@ -692,11 +740,10 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     Code.ensure_loaded(Graph.ComputationGraph)
     chains = graph
     |> longest_chain(node_type)
-    # TODO: we should not use code from test helpers in production.
-    #       Move here code from Cuda.Test.GraphHelpers.nodes2ids()
-    |> Cuda.Test.GraphHelpers.nodes2ids()
+    |> prc_nodes2ids()
     prc_wrap(graph, chains)
   end
+
   defp prc_wrap(graph, []), do: graph
   defp prc_wrap(graph, [chain | rest]) do
     nested_id = "comp_" <> UUID.uuid1()
@@ -723,6 +770,14 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> GraphProto.add(nested)
     |> move(nested_id, chain)
     |> prc_wrap(rest)
+  end
+
+  def prc_nodes2ids([]), do: []
+  def prc_nodes2ids([val | rest]) when is_list(val) do
+    [Enum.map(val, &(&1.id)) | prc_nodes2ids(rest)]
+  end
+  def prc_nodes2ids([val | rest]) do
+    [val.id | prc_nodes2ids(rest)]
   end
 
   #-----------------------------------------------------------------------------

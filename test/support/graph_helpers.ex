@@ -61,7 +61,7 @@ defmodule Cuda.Test.GraphHelpers do
     """
     use Node
     def __pins__(assigns) do
-      {i, o} = Keyword.get(assigns.options, :io)
+      {i, o} = Keyword.get(assigns.options, :io, {1, 1})
       inputs =  i > 0 && (for x <- 1..i, do: input(String.to_atom("input#{x}"), :i8))   || []
       outputs = o > 0 && (for x <- 1..o, do: output(String.to_atom("output#{x}"), :i8)) || []
       inputs ++ outputs
@@ -322,6 +322,29 @@ defmodule Cuda.Test.GraphHelpers do
     |> link({:n, :output1}, :o1)
     |> link({:o, :output}, :o2)
   end
+  def graph(:network_test) do
+    graph(id: :network,
+          pins: [
+            %Pin{id: :input, type: :input, data_type: :i8},
+            %Pin{id: :reply, type: :input, data_type: :i8},
+            %Pin{id: :output, type: :output, data_type: :i8}])
+    |> add(:conv,      Single)
+    |> add(:fc,        Single)
+    |> add(:error,     Custom, io: {2, 1})
+    |> add(:back_fc,   Custom, io: {3, 1})
+    |> add(:back_conv, Custom, io: {3, 1})
+    |> link(:input,                 {:back_conv, :input1})
+    |> link(:input,                 {:conv,      :input})
+    |> link(:reply,                 {:error,     :input2})
+    |> link({:conv,      :output},  {:back_conv, :input2})
+    |> link({:conv,      :output},  {:back_fc,   :input1})
+    |> link({:conv,      :output},  {:fc,        :input})
+    |> link({:fc,        :output},  {:back_fc,   :input2})
+    |> link({:fc,        :output},  {:error,     :input1})
+    |> link({:error,     :output1}, {:back_fc,   :input3})
+    |> link({:back_fc,   :output1}, {:back_conv, :input3})
+    |> link({:back_conv, :output1}, :output)
+  end
   def graph(opts) do
     %Graph{} |> Map.merge(opts |> Enum.into(%{}))
   end
@@ -397,5 +420,38 @@ defmodule Cuda.Test.GraphHelpers do
   end
   def callback(action, args, _state) do
     {action, args}
+  end
+
+  def view(%{id: id, nodes: n, links: l}) do
+    IO.puts("Graph: #{id}")
+    IO.puts("Nodes:")
+    Enum.each(n, & IO.puts("#{&1.id}"))
+    IO.puts("Links:")
+    Enum.each(l, fn
+      {{:__self__, gpin}, {nid, npin}} -> IO.puts("#{gpin} -> {#{nid}, #{npin}}")
+      {{nid, npin}, {:__self__, gpin}} -> IO.puts("{#{nid}, #{npin}} -> #{gpin}")
+      {{nid, npin}, {nid2, npin2}}     -> IO.puts("{#{nid}, #{npin}} -> {#{nid2}, #{npin2}}")
+    end)
+  end
+
+  def update_node(g, _, []), do: g
+  def update_node(g, node_id, [opt | rest]) do
+    g = update_node(g, node_id, opt)
+    update_node(g, node_id, rest)
+  end
+  def update_node(g, node_id, {key, value}) do
+    with index when not is_nil(index) <- Enum.find_index(g.nodes, & &1.id == node_id) do
+      nodes = List.update_at(g.nodes, index, fn node ->
+        case key do
+          :id   -> %{node | id: value}
+          :type -> %{node | type: value}
+          :pins -> %{node | pins: value}
+          _     -> node     
+        end
+      end)
+      %{g | nodes: nodes}
+    else
+      nil -> g
+    end
   end
 end
