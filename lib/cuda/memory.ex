@@ -71,6 +71,14 @@ defmodule Cuda.Memory do
   def offset(shape, []), do: size(shape)
   def offset(shape, field), do: offset(shape, [field])
 
+  def arity({_, arity}) do
+    size(arity)
+  end
+  def arity(_), do: 1
+
+  def type({t, _}), do: t
+  def type(t), do: t
+
   def pack(:zero, t) when is_atom(t) or is_bitstring(t), do: pack(0, t)
   def pack(_, {:skip, bytes}), do: <<0::unit(8)-size(bytes)>>
   def pack(x, :i8), do: <<x>>
