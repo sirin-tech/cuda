@@ -71,7 +71,27 @@ defmodule Cuda.Memory do
   def offset(shape, []), do: size(shape)
   def offset(shape, field), do: offset(shape, [field])
 
+  def inspect_structure(%__MODULE__{} = mem, opts \\ []) do
+    vars = mem.vars |> Enum.map(fn {k, v} -> {Cuda.Graph.Node.string_id(k), v} end)
+    w1 = vars |> Enum.map(& elem(&1, 0)) |> Enum.map(&String.length/1) |> Enum.max()
+    w2 = vars |> Enum.map(& elem(elem(&1, 1), 0)) |> Enum.map(&String.length("#{&1}")) |> Enum.max()
+    vars = vars
+           |> Enum.map(fn {k, {o, t}} ->
+             name = String.pad_trailing(k, w1, " ")
+             offset = String.pad_leading("#{o}", w2, " ")
+             "#{name} | #{offset} | #{inspect t}"
+           end)
+           |> Enum.join("\n")
+    label = case Keyword.get(opts, :label) do
+      nil   -> ""
+      label -> " #{inspect(label)}"
+    end
+    IO.puts("\nMemory#{label}. Type: #{mem.type}\n#{vars}")
+    mem
+  end
+
   def pack(:zero, t) when is_atom(t) or is_bitstring(t), do: pack(0, t)
+  def pack(_, {:skip, bytes}) when bytes < 0, do: <<>>
   def pack(_, {:skip, bytes}), do: <<0::unit(8)-size(bytes)>>
   def pack(x, :i8), do: <<x>>
   def pack(x, :i16), do: <<x::little-size(16)>>
@@ -240,6 +260,9 @@ defmodule Cuda.Memory do
     |> binary_part(sbefore, size)
     |> unpack(type)
   end
+  def unpack(x, %Shape{type: type, skip: skip}) when is_integer(skip) and skip < 0 do
+    unpack(x, type)
+  end
   def unpack(x, %Shape{type: type, skip: skip}) when is_integer(skip) do
     size = byte_size(x) - skip
     <<data::binary-size(size), _::binary>> = x
@@ -277,6 +300,9 @@ defmodule Cuda.Memory do
         acc
     end)
   end
+  defp unpack_list(x, {:skip, bytes}) when bytes < 0 do
+    {[], x}
+  end
   defp unpack_list(x, {:skip, bytes}) do
     <<_::binary-size(bytes), rest::binary>> = x
     {[], rest}
@@ -309,6 +335,7 @@ defmodule Cuda.Memory do
   def size(:f16), do: 2
   def size(:f32), do: 4
   def size(:f64), do: 8
+  def size({:skip, n}) when n < 0, do: 0
   def size({:skip, n}), do: n
   def size(type) when is_atom(type) or is_bitstring(type) do
     case Regex.run(@type_re, "#{type}", capture: :all_but_first) do

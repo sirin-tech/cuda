@@ -11,7 +11,8 @@ defmodule Cuda.Graph do
   alias Cuda.Graph.NodeProto
 
   @type id :: String.t | atom | non_neg_integer
-  @type link :: {id, id}
+  @type link_spec :: {id, id}
+  @type link :: {link, link}
 
   @type t :: %__MODULE__{
     id: id,
@@ -19,7 +20,7 @@ defmodule Cuda.Graph do
     type: Node.type,
     pins: [Pin.t],
     nodes: [Node.t],
-    links: [{link, link}],
+    links: [link],
     assigns: map
   }
 
@@ -183,12 +184,15 @@ defmodule Cuda.Graph do
     with %Pin{} = pin <- NodeProto.pin(node, pin_name) do
       if not pin.type in types do
         types = types |> Enum.map(& "#{&1}") |> Enum.join(" or ")
-        compile_error("Pin `#{pin_name}` of node `#{node.id}` has a wrong" <>
+        id = Node.string_id(node.id)
+        compile_error("Pin `#{pin_name}` of node `#{id}` has a wrong" <>
                       " type. The #{types} types are expected.")
       end
       pin
     else
-      _ -> compile_error("Pin `#{pin_name}` not found in node `#{node.id}`")
+      _ ->
+        id = Node.string_id(node.id)
+        compile_error("Pin `#{pin_name}` not found in node `#{id}`")
     end
   end
 
@@ -200,6 +204,9 @@ defmodule Cuda.Graph do
       compile_error("The pins #{p1.id} and #{p2.id} has different types")
     end
   end
+  # nil data_type assumes auto-detection
+  defp assert_pin_data_type(%{data_type: nil}, _), do: true
+  defp assert_pin_data_type(_, %{data_type: nil}), do: true
   defp assert_pin_data_type(%{data_type: t1} = p1, %{data_type: t2} = p2) do
     if t1 != t2 do
       compile_error("The pins #{p1.id} and #{p2.id} has different types")
@@ -214,7 +221,7 @@ end
 
 defimpl Cuda.Graph.Factory, for: Cuda.Graph do
   require Cuda
-  alias Cuda.Graph.Node
+  alias Cuda.Graph.{Node, NodeProto}
 
   @doc """
   Creates new graph node
@@ -230,10 +237,40 @@ defimpl Cuda.Graph.Factory, for: Cuda.Graph do
         true -> module.__graph__(graph)
         _    -> graph
       end
-      # graph = graph |> Graph.expand()
-      graph
+      graph |> set_pin_shapes()
     else
       _ -> Cuda.compile_error("Node module #{module} could not be loaded")
     end
   end
+
+  defp set_pin_shapes(%{pins: pins} = graph) do
+    %{graph | pins: pins |> Enum.map(& set_pin_shape(graph, &1))}
+  end
+
+  defp set_pin_shape(graph, %{alias: {:group, a}, data_type: nil} = pin) when not is_nil(a) do
+    pins = graph.nodes
+           |> Enum.map(fn node ->
+             pins = node.pins
+                    |> Enum.filter(& &1.group == a)
+                    |> Enum.map(& {&1.id, &1.data_type})
+                    |> Enum.into(%{})
+             {node.id, pins}
+           end)
+           |> Enum.filter(fn
+             {_, []} -> false
+             _       -> true
+           end)
+           |> Enum.into(%{})
+    case pins do
+      []   -> Cuda.compile_error("Invalid pin alias group: #{inspect a}")
+      pins -> %{pin | data_type: pins}
+    end
+  end
+  defp set_pin_shape(graph, %{alias: a, data_type: nil} = pin) when not is_nil(a) do
+    case NodeProto.pin(graph, a) do
+      nil     -> Cuda.compile_error("Invalid pin alias: #{inspect a}")
+      aliases -> %{pin | data_type: aliases.data_type}
+    end
+  end
+  defp set_pin_shape(_, pin), do: pin
 end

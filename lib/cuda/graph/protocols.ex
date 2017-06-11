@@ -44,6 +44,19 @@ defprotocol Cuda.Graph.GraphProto do
   """
   @spec node(graph :: Graph.t, id :: Graph.id | [Graph.id]) :: Node.t
   def node(graph, id)
+
+  @doc """
+  Returns pin of link specification. It can be a pin of graph itself or a pin
+  of child node
+  """
+  @spec link_spec_pin(graph :: Graph.t, link_spec :: Graph.link_spec) :: Pin.t
+  def link_spec_pin(graph, link_spec)
+
+  @doc """
+  Returns a node of link specification. It can be a graph itself or child node
+  """
+  @spec link_spec_node(graph :: Graph.t, link_spec :: Graph.link_spec) :: Node.t | Graph.t
+  def link_spec_node(graph, link_spec)
 end
 
 defprotocol Cuda.Graph.Factory do
@@ -132,4 +145,20 @@ defimpl Cuda.Graph.GraphProto, for: Any do
     end)
   end
   def node(_, _), do: nil
+
+  def link_spec_pin(graph, {:__self__, pin}) do
+    Cuda.Graph.NodeProto.pin(graph, pin)
+  end
+  def link_spec_pin(graph, {node, pin}) do
+    with %{} = node <- node(graph, node) do
+      Cuda.Graph.NodeProto.pin(node, pin)
+    end
+  end
+
+  def link_spec_node(graph, {:__self__, _}) do
+    graph
+  end
+  def link_spec_node(graph, {node, _}) do
+    node(graph, node)
+  end
 end

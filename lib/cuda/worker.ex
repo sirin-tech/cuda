@@ -20,16 +20,16 @@ defmodule Cuda.Worker do
     end
   end
 
-  def run(pid, input) do
-    GenServer.call(pid, {:run, input})
+  def run(pid, input, args \\ %{}) do
+    GenServer.call(pid, {:run, input, args})
   end
 
   #def gpu_info(pid) do
   #  GenServer.call(pid, :info)
   #end
 
-  def handle_call({:run, input}, _from, st) do
-    opts = [cuda: st.cuda]
+  def handle_call({:run, input, args}, _from, st) do
+    opts = [cuda: st.cuda, args: args]
     result = Runner.run(st.graph, input, opts)
     {:reply, result, st}
   end

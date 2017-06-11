@@ -516,24 +516,37 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
   # longest_path
   #-----------------------------------------------------------------------------
   def longest_path(%{links: links}) do
-    links
-    |> Enum.filter(&input_link?/1)
-    |> Enum.map(& longest_path(links, [], &1))
-    |> Enum.sort_by(&length/1)
-    |> List.last
+    links = links
+            |> Enum.filter(&input_link?/1)
+            |> Enum.map(& longest_path(links, [], &1))
+            |> Enum.filter(&is_list/1)
+            |> Enum.sort_by(&length/1)
+    case links do
+      []    -> []
+      links -> List.last(links)
+    end
   end
   defp longest_path(_, path, {_, {:__self__, _}} = link) do
     path ++ [link]
   end
-  defp longest_path(links, path, {_, {dst, _}} = link) do
-    links
-    |> Enum.filter(fn
-      {{^dst, _}, _} -> true
-      _              -> false
-    end)
-    |> Enum.map(& longest_path(links, path ++ [link], &1))
-    |> Enum.sort_by(&length/1)
-    |> List.last
+  defp longest_path(links, path, {{_src, _}, {dst, _}} = link) do
+    output = links
+             |> Enum.filter(fn
+               {{^dst, _}, _} -> true
+               _              -> false
+             end)
+    if output == [] do
+      path ++ [link]
+    else
+      links = output
+              |> Enum.map(& longest_path(links, path ++ [link], &1))
+              |> Enum.filter(&is_list/1)
+              |> Enum.sort_by(&length/1)
+      case links do
+        []    -> []
+        links -> List.last(links)
+      end
+    end
   end
 
   defp input_link?({{:__self__, _}, _}), do: true
@@ -620,6 +633,13 @@ defimpl Cuda.Graph.Processing, for: Cuda.Graph do
     |> Enum.reduce({%{}, graph}, fn pin, {dict, graph} ->
       id = pin.id
       pin = %{pin | id: UUID.uuid1()}
+      # added by alexiss - when pin type is consumer it should be setted to
+      #                    input in graph rather then consumer
+      pin = if pin.type == :consumer do
+        %{pin | type: :input}
+      else
+        pin
+      end
       graph = %{graph | pins: [pin | graph.pins]}
       dict = Map.put(dict, id, pin.id)
       {dict, graph}

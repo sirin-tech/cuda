@@ -85,7 +85,7 @@ defmodule Cuda.Graph.Node do
 
   @exports [consumer: 2, consumer: 3, input: 2, input: 3, output: 2, output: 3,
             pin: 3, pin: 4, producer: 2, producer: 3]
-  @input_pins  ~w(input consumer)a
+  @input_pins  ~w(input consumer terminator)a
   @output_pins ~w(output producer)a
   @graph_types ~w(graph computation_graph)a
 
@@ -117,13 +117,13 @@ defmodule Cuda.Graph.Node do
   Creates a pin with specified parameters
   """
   @spec pin(name :: Graph.id, type :: Pin.type, data_type :: any) :: Pin.t
-  @spec pin(name :: Graph.id, type :: Pin.type, data_type :: any, layout :: Pin.layout) :: Pin.t
-  def pin(name, type, data_type, layout \\ :floating) do
+  @spec pin(name :: Graph.id, type :: Pin.type, data_type :: any, group :: Pin.group) :: Pin.t
+  def pin(name, type, data_type, group \\ nil) do
     %Pin{
       id: name,
       type: type,
       data_type: data_type,
-      layout: layout
+      group: group
     }
   end
 
@@ -133,9 +133,9 @@ defmodule Cuda.Graph.Node do
   Input is a pin from which the data passed inside an evaluation node.
   """
   @spec input(name :: Graph.id, data_type :: any) :: Pin.t
-  @spec input(name :: Graph.id, data_type :: any, layout :: Pin.layout) :: Pin.t
-  def input(name, data_type, layout \\ :floating) do
-    pin(name, :input, data_type, layout)
+  @spec input(name :: Graph.id, data_type :: any, group :: Pin.group) :: Pin.t
+  def input(name, data_type, group \\ nil) do
+    pin(name, :input, data_type, group)
   end
 
   @doc """
@@ -144,9 +144,9 @@ defmodule Cuda.Graph.Node do
   Ouput is a pin through which you pass data outside from your node.
   """
   @spec output(name :: Graph.id, data_type :: any) :: Pin.t
-  @spec output(name :: Graph.id, data_type :: any, layout :: Pin.layout) :: Pin.t
-  def output(name, data_type, layout \\ :floating) do
-    pin(name, :output, data_type, layout)
+  @spec output(name :: Graph.id, data_type :: any, group :: Pin.group) :: Pin.t
+  def output(name, data_type, group \\ nil) do
+    pin(name, :output, data_type, group)
   end
 
   @doc """
@@ -156,9 +156,9 @@ defmodule Cuda.Graph.Node do
   be passed to `:input` or `:consumer` pins.
   """
   @spec producer(name :: Graph.id, data_type :: any) :: Pin.t
-  @spec producer(name :: Graph.id, data_type :: any, layout :: Pin.layout) :: Pin.t
-  def producer(name, data_type, layout \\ :floating) do
-    pin(name, :producer, data_type, layout)
+  @spec producer(name :: Graph.id, data_type :: any, group :: Pin.group) :: Pin.t
+  def producer(name, data_type, group \\ nil) do
+    pin(name, :producer, data_type, group)
   end
 
   @doc """
@@ -169,9 +169,9 @@ defmodule Cuda.Graph.Node do
   pins.
   """
   @spec consumer(name :: Graph.id, data_type :: any) :: Pin.t
-  @spec consumer(name :: Graph.id, data_type :: any, layout :: Pin.layout) :: Pin.t
-  def consumer(name, data_type, layout \\ :floating) do
-    pin(name, :consumer, data_type, layout)
+  @spec consumer(name :: Graph.id, data_type :: any, group :: Pin.group) :: Pin.t
+  def consumer(name, data_type, group \\ nil) do
+    pin(name, :consumer, data_type, group)
   end
 
   @doc """

@@ -9,9 +9,16 @@ defmodule Cuda.Graph.Visualize.Dot do
     n = UUID.uuid1()
     file = Path.join(System.tmp_dir!, "#{n}.gv")
     File.write(file, gv)
+    #IO.puts(gv)
     out = Keyword.get(opts, :output, "#{n}.svg")
     System.cmd("dot", ["-Tsvg", file, "-o", out])
     File.rm_rf!(file)
+  end
+
+  defp render_pin(pin, node_id) do
+    pin_id = node_id(pin.id, node_id)
+    label = if is_nil(pin.group), do: "#{pin.id}", else: "#{pin.id} (#{pin.group})"
+    ~s(#{pin_id}[label="#{label}"])
   end
 
   defp render_node(node, parent_id \\ nil) do
@@ -27,20 +34,18 @@ defmodule Cuda.Graph.Visualize.Dot do
 
     i = node
         |> NodeProto.pins(input_pin_types())
-        |> Enum.map(fn pin ->
-          pin_id = node_id(pin.id, id)
-          ~s(#{pin_id}[label="#{pin.id}"])
-        end)
+        |> Enum.map(& render_pin(&1, id))
         |> Enum.join("; ")
     i = "subgraph #{id}_inputs_cluster {rankdir=TB;#{i}}"
 
     o = node
         |> NodeProto.pins(output_pin_types())
-        |> Enum.map(fn pin ->
-          pin_id = node_id(pin.id, id)
-          ~s(#{pin_id}[label="#{pin.id}"])
-        end)
+        |> Enum.map(& render_pin(&1, id))
         |> Enum.join("; ")
+    o = case o do
+      "" -> ""
+      o  -> o <> ";"
+    end
 
     links = if parent_id == nil, do: render_links(node), else: []
     links = links |> Enum.join("; ")
@@ -65,7 +70,7 @@ defmodule Cuda.Graph.Visualize.Dot do
       #{i};
       #{children}
       #{links}
-      #{o};
+      #{o}
     }
     """
   end

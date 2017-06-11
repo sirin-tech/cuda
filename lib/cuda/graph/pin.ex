@@ -6,17 +6,19 @@ defmodule Cuda.Graph.Pin do
   alias Cuda.Graph
   require Logger
 
-  @type type :: :input | :output | :producer | :consumer
-  @type layout :: :fixed | :floating
+  @type type :: :input | :output | :producer | :consumer | :terminator
+  @type group :: nil | atom
+  @type alias :: nil | {:group, atom} | Graph.id
 
   @type t :: %__MODULE__{
     id: Graph.id,
     type: type,
-    layout: layout,
+    group: group,
+    alias: alias,
     data_type: any
   }
 
-  defstruct [:id, :type, :data_type, layout: :floating]
+  defstruct [:id, :type, :group, :alias, :data_type]
 
   def data_size(%__MODULE__{data_type: data_type}) do
     type_size(data_type)

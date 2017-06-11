@@ -125,7 +125,7 @@ defmodule Cuda.Template.PtxHelpers do
     with nil <- Memory.offset(shape, var) do
       Logger.warn("Can't find offset for `#{inspect var}` in memory `#{memory}`")
       nil
-    end
+    end# |> IO.inspect(label: :OFFSET)
   end
 
   @doc """

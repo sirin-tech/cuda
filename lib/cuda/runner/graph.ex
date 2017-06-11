@@ -43,7 +43,7 @@ defimpl Cuda.Runner, for: Cuda.Graph do
   def run(%{type: :computation_graph, assigns: assigns}, inputs, opts) do
     with cuda when not is_nil(cuda) <- Keyword.get(opts, :cuda) do
       # get input and convert it to binary
-      pins = Memory.pack(inputs, assigns.memory.pins)
+      pins = Memory.pack(inputs, assigns.memory.pins)# |> IO.inspect)
       # load pins into GPU
       {:ok, mpins} = Cuda.memory_load(cuda, pins)
       # prepare arguments and batch list

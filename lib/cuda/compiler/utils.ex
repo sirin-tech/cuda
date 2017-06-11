@@ -3,6 +3,9 @@ defmodule Cuda.Compiler.Utils do
   alias Cuda.Memory
   import Node, only: [input_pin_types: 0, output_pin_types: 0]
 
+  # TODO: Fix negative skips.
+  #       reproduced by `mix test test/network_test.exs:85`,
+  #       negative skip in input of {:back_propagation, :fc, :fc_node}
   def put_pins_shapes(%{assigns: %{pin_offsets: offsets}} = node) do
     #IO.inspect({node.id, offsets})
     size = case Map.get(node.assigns, :pin_size) do
@@ -13,7 +16,6 @@ defmodule Cuda.Compiler.Utils do
     pins = if o == Enum.uniq(o) do
       node.pins |> pins_shape(offsets, size)
     else
-      #IO.inspect({:SAME, o})
       inputs  = node
                 |> NodeProto.pins(input_pin_types())
                 |> pins_shape(offsets, size)
@@ -21,15 +23,14 @@ defmodule Cuda.Compiler.Utils do
                 |> NodeProto.pins(output_pin_types())
                 |> pins_shape(offsets, size)
       %Memory{vars: inputs.vars ++ outputs.vars}
-      #Memory.merge(inputs, outputs)
-    end
+    end# |> Memory.inspect_structure(label: node.id)
     memory = node.assigns
              |> Map.get(:memory, %{})
              |> Map.put(:pins, pins)
     NodeProto.assign(node, memory: memory)
   end
   def put_pins_shapes(%{pins: _} = node) do
-    pins   = node.pins |> pins_shape()
+    pins   = node.pins |> pins_shape()# |> Memory.inspect_structure(label: node.id)
     memory = node.assigns
              |> Map.get(:memory, %{})
              |> Map.put(:pins, pins)
@@ -38,25 +39,30 @@ defmodule Cuda.Compiler.Utils do
   def put_pins_shapes(node), do: node
 
   def pins_shape(pins) do
-    {vars, _} = pins |> Enum.reduce({[], 0}, fn pin, {vars, offset} ->
+    {vars, _} = pins |> Enum.map_reduce(0, fn pin, offset ->
       size = Pin.data_size(pin)
-      {vars ++ [{pin.id, {offset, pin.type}}], offset + size}
+      {{pin.id, {offset, pin.data_type}}, offset + size}
     end)
     %Memory{vars: vars}
   end
-  def pins_shape(pins, offsets, pin_size) do
+  def pins_shape(pins, offsets, _pin_size) do
     pin_ids = pins |> Enum.map(& &1.id)
+    offsets = offsets |> Enum.sort_by(fn {_, {o, _}} -> o end)
+    pin_size = offsets
+               |> Enum.map(& elem(elem(&1, 1), 1))
+               |> Enum.reduce(0, &+/2)
+    [{_, {first_offset, _}} | _] = offsets
+    pin_size = pin_size + first_offset
     {k, o} = offsets
              |> Enum.filter(fn {k, _} -> k in pin_ids end)
-             |> Enum.sort_by(fn {_, o} -> o end)
              |> Enum.unzip()
-    s = Enum.chunk(o ++ [pin_size], 2, 1) |> Enum.map(fn [a, b] -> b - a end)
+    s = o |> Enum.map(& elem(&1, 0))
+    s = Enum.chunk(s ++ [pin_size], 2, 1) |> Enum.map(fn [a, b] -> b - a end)
     vars = [k, o, s]
            |> Enum.zip()
            |> Enum.with_index()
-           |> Enum.map(fn {{pin_id, offset, size}, idx} ->
+           |> Enum.map(fn {{pin_id, {offset, data_size}, size}, idx} ->
              pin = Enum.find(pins, & &1.id == pin_id)
-             data_size = Pin.data_size(pin)
              skip_before = if idx == 0 and offset > 0, do: offset, else: 0
              skip_after = case size - data_size do
                skip when skip < 0 -> pin_size + skip
